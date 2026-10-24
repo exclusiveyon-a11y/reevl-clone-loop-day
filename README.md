@@ -5,6 +5,10 @@
 [Clone Loop Day in Seoul](https://luma.com/a1bags64) (2026-10-24, NAVER D2SF, Agentic GTM 해커톤) 출품작이다.
 리블은 전국 아파트 약 4.5만 단지의 실거래·입지 정보를 무료로 보여주는 서비스다. 리블 본체 코드는 별도 비공개 저장소에 있고, 이 저장소에는 에이전트의 핵심 로직과 계획·측정만 둔다.
 
+![GTM Agent 관제 콘솔 — 찾은 글이 질문 판정·매칭·초안·점수를 거쳐 통과/제외로 갈리는 과정](docs/media/console.gif)
+
+▶ [작동 영상 (MP4, 19초)](docs/media/console.mp4) · [정지 화면](docs/media/console.png) · [모바일](docs/media/console-mobile.png) — 예시 데이터로 녹화한 데모 모드(`python -m agent.admin --demo`)다. 실제 실행 화면은 커뮤니티 글 제목이 담겨 공개하지 않는다.
+
 ```mermaid
 flowchart LR
   A["찾기<br/>네이버·다음·커뮤니티·유튜브 공식 API"] --> B["매칭<br/>글 속 단지·학교·역 → 리블 페이지"]
