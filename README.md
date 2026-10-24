@@ -143,7 +143,7 @@ flowchart LR
 ## 빠른 시작
 
 ```bash
-git clone https://github.com/exclusiveyon-a11y/reevl-gtm-loop && cd reevl-clone-loop-day
+git clone https://github.com/exclusiveyon-a11y/reevl-gtm-loop && cd reevl-gtm-loop
 python -m agent reply --qa --text "송파구 오금동 삼성이랑 상아2차 중에 실거주로 고민입니다"
 ```
 
