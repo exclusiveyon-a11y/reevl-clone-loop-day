@@ -10,7 +10,7 @@
 
 | | |
 |---|---|
-| Repo | https://github.com/exclusiveyon-a11y/reevl-clone-loop-day |
+| Repo | https://github.com/exclusiveyon-a11y/reevl-gtm-loop |
 | Loop | 네이버 카페·지식iN·당근·유튜브 등 국내 부동산 커뮤니티에서 실제 주거 고민 탐지 → 질문 속 단지·학교·역을 추출해 리블 실거래 데이터와 매칭(D1부터 Claude로 예산·조건까지 추출) → 근거 있는 2~3줄 답변 + 맞춤 비교 딥링크(두 단지 미리보기 카드 포함) → 정확성·커뮤니티 규칙 검수 후 허용된 방식으로 게시(Day 0 규칙 점수·코드 검증, D1부터 Claude 판정) → GA4로 유입·참여·재방문 측정 → 매일 성과 높은 질문 유형·채널에 집중 |
 | 차별점 | 광고성 댓글이 아닌 실제 질문에 대한 데이터 기반 답변. 기존 네이버 카페에서 자발적으로 확산된 단지 비교 링크가 참여율 89%, 세션당 7페이지를 기록한 것을 재현·확장하는 루프 |
 | 오늘 실측 | 커뮤니티 콘텐츠 365건 발견 → 유효 질문 12건 선별 (초기 비용 0원) |
@@ -62,7 +62,7 @@ AI 예산은 Claude 크레딧 $100(11/7 만료) 안에서 하루 $8 · 총 $98�
 
 > 사람들이 집을 고민하는 순간, 광고보다 검증 가능한 데이터와 바로 열리는 비교 결과를 제공하는 것이 더 효과적인 성장 방법일 수 있다.
 
-**GitHub:** https://github.com/exclusiveyon-a11y/reevl-clone-loop-day  
+**GitHub:** https://github.com/exclusiveyon-a11y/reevl-gtm-loop  
 **Service:** https://reevl.co.kr  
 **7-Day Experiment Log:** [`docs/07-loop-log.md`](docs/07-loop-log.md)
 
@@ -89,7 +89,7 @@ flowchart LR
 | | |
 |---|---|
 | 라이브 서비스 | https://reevl.co.kr |
-| 저장소 | https://github.com/exclusiveyon-a11y/reevl-clone-loop-day |
+| 저장소 | https://github.com/exclusiveyon-a11y/reevl-gtm-loop |
 | 기준값·결과표 | [docs/01-baseline.md](docs/01-baseline.md) · [results/daily-log.md](results/daily-log.md) |
 | 에이전트 구조 | [docs/05-agent.md](docs/05-agent.md) |
 | 관리자 콘솔 | 로컬 전용 `python -m agent.admin` → http://127.0.0.1:8799 (커뮤니티 글 주소가 담겨 공개 배포하지 않음) |
@@ -143,7 +143,7 @@ flowchart LR
 ## 빠른 시작
 
 ```bash
-git clone https://github.com/exclusiveyon-a11y/reevl-clone-loop-day && cd reevl-clone-loop-day
+git clone https://github.com/exclusiveyon-a11y/reevl-gtm-loop && cd reevl-clone-loop-day
 python -m agent reply --qa --text "송파구 오금동 삼성이랑 상아2차 중에 실거주로 고민입니다"
 ```
 

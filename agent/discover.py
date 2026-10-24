@@ -36,7 +36,7 @@ from email.utils import parsedate_to_datetime
 
 from . import config
 
-UA = "reevl-gtm-agent/0.1 (+https://github.com/exclusiveyon-a11y/reevl-clone-loop-day)"
+UA = "reevl-gtm-agent/0.1 (+https://github.com/exclusiveyon-a11y/reevl-gtm-loop)"
 KST = timezone(timedelta(hours=9))
 
 NAVER_API = {"naver_cafe": "https://openapi.naver.com/v1/search/cafearticle.json",

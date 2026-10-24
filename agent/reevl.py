@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 
 ENDPOINT = os.environ.get("REEVL_MCP_URL", "https://reevl.co.kr/api/mcp")
-UA = "reevl-gtm-agent/0.1 (+https://github.com/exclusiveyon-a11y/reevl-clone-loop-day)"
+UA = "reevl-gtm-agent/0.1 (+https://github.com/exclusiveyon-a11y/reevl-gtm-loop)"
 
 
 _MEM: dict[str, dict] = {}
