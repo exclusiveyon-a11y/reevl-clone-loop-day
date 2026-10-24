@@ -1,9 +1,56 @@
-# 리블 GTM Agent
+# 🏠 REEVL GTM Agent — 부동산 질문을 실제 데이터로 연결하는 Growth Loop
 
-커뮤니티에 올라온 실제 부동산 질문을 찾아, 글에 맞는 [리블](https://reevl.co.kr) 페이지와 확인된 실거래로 답글 초안을 만들고, 허용된 곳에만 게시하는 에이전트.
+**광고를 뿌리는 대신, 사람들이 이미 묻고 있는 부동산 질문에 데이터로 답합니다.**
 
-[Clone Loop Day in Seoul](https://luma.com/a1bags64) (2026-10-24, NAVER D2SF, Agentic GTM 해커톤) 출품작이다.
-리블은 전국 아파트 약 4.5만 단지의 실거래·입지 정보를 무료로 보여주는 서비스다. 리블 본체 코드는 별도 비공개 저장소에 있고, 이 저장소에는 에이전트의 핵심 로직과 계획·측정만 둔다.
+[Clone Loop Day in Seoul](https://luma.com/a1bags64) (2026-10-24, NAVER D2SF · Agentic GTM) 출품작 · 🌐 https://reevl.co.kr
+
+### 🏢 Product — REEVL
+
+리블(Reevl)은 전국 약 4.6만 개 아파트 단지와 12개 부동산 유형의 실거래·입지 정보를 분석하는 무료 AI 부동산 데이터 플랫폼입니다.
+전국 실거래가, 학군, 교통, 전세가율, 거래량 등을 연결하고, 자체 AI 기반 가격 전망·수요강도 분석과 단지 비교·조건별 스크리너를 제공합니다.
+
+### 🔄 Our Agentic Loop
+
+**Discover → Match → Answer → Review → Measure → Improve**
+
+1. **Discover:** 네이버 카페·지식iN·유튜브·국내 부동산 커뮤니티에서 실제 주거 질문 탐지 — 공식 API만 사용(`agent/discover.py`)
+2. **Match:** 질문에 등장하는 단지·학교·역·지역을 리블 데이터와 자동 매칭(`agent/match.py`, `agent/hubs.py`)
+3. **Answer:** 검증된 실거래 데이터로 답하는 2~3줄 요약과 맞춤 비교·분석 딥링크 생성(`agent/intent.py`, `agent/reply.py`)
+4. **Review:** Claude Haiku/Sonnet으로 정확성과 관련성 평가. 게시 정책에 맞춰 검수·발행하고 리블과의 관계 공개 — *Day 0은 규칙 기반 점수·코드 검증으로 동작, Claude 판정·심사는 D1~D2 적용([설계·예산](docs/06-claude-plan.md))*
+5. **Measure & Improve:** GA4로 유입·참여·재방문을 추적하고 매일 성과에 따라 다음 질문 선정과 답변 방식 개선(`analysis/ga_report.py`, [실험 로그](docs/07-loop-log.md))
+
+**차별점:** 기존 GTM Agent가 잠재고객에게 메시지를 보내는 방식이라면, 리블은 이미 존재하는 부동산 질문을 실제 데이터와 연결해 '공유 가능한 답변'으로 바꿉니다.
+
+### 🧪 Day 0 — Initial Validation
+
+- 커뮤니티 콘텐츠 **365건 탐지** (네이버 카페·지식iN·다음 카페·디시·블라인드·클리앙·에펨·뽐뿌·엠팍·더쿠, 유튜브 별도 시험)
+- 질문 적합성·데이터 매칭·스코어링 통과 **12건**
+- 초기 탐지 비용 **0원**
+- 기존 리블 비교 공유 링크 실측: **참여율 89%, 세션당 7.0페이지** (최근 30일, GA4)
+
+리블의 기존 사용자는 네이버 검색에 집중되어 있지만, 커뮤니티에서 자연스럽게 공유된 아파트 비교 링크는 높은 참여도를 보였습니다. 이 현상을 반복 가능한 GTM Loop로 확장하고 있습니다.
+
+### 🎯 7-Day Goals — Until Oct 31, 18:00 KST
+
+| Metric | Baseline | Target |
+|---|---:|---:|
+| Non-Naver acquisition | 66 users/week | **500+** |
+| Agent-attributed landing sessions | 0 (new campaign) | **100+** |
+| Landing engagement rate | 89% (existing comparison) | **85%+** |
+| Pages per session | 7.0 (existing comparison) | **5.0+** |
+| Returning user rate | 3.8% | **6%** |
+| Cases requiring additional human review | 100% | **≤20%** |
+| Policy violations / content removals | — | **0** |
+
+AI 평가 예산은 하루 최대 $2로 제한하며, 커뮤니티 정책과 게시 권한을 준수합니다. 매일의 발견·답변·배포·성과·개선 사항을 공개 로그에 기록합니다.
+
+**우리가 검증하려는 가설은 단순합니다.**
+
+> 사람들이 집을 고민하는 순간, 광고보다 검증 가능한 데이터와 바로 열리는 비교 결과를 제공하는 것이 더 효과적인 성장 방법일 수 있다.
+
+**GitHub:** https://github.com/exclusiveyon-a11y/reevl-clone-loop-day · **Service:** https://reevl.co.kr · **7-Day Experiment Log:** [`docs/07-loop-log.md`](docs/07-loop-log.md)
+
+---
 
 ![GTM Agent 관제 콘솔 — 찾은 글이 질문 판정·매칭·초안·점수를 거쳐 통과/제외로 갈리는 과정](docs/media/console.gif)
 
@@ -34,22 +81,6 @@ flowchart LR
 | 루프 개선 기록 | [docs/07-loop-log.md](docs/07-loop-log.md) |
 | 데모 영상 | 추가 예정 |
 | 발표 슬라이드 | 추가 예정 |
-
-## 7일 목표 (2026-10-24 18:00 ~ 10-31 18:00 KST)
-
-리블은 무료 서비스라 매출이 아니라 **사용자**를 목표로 둔다. 네이버 검색 유입은 이미 혼자 늘고 있어(주 +61%) 성과로 세지 않고, 이 루프로 생긴 **증분**만 센다.
-
-| 목표 | 기준 (10/17~23) | 7일 목표 | 측정 |
-|---|---:|---:|---|
-| 네이버 밖 외부 유입(커뮤니티·유튜브·공유) | 주 66명 | **주 500명+** | GA4 세션 시작 리퍼러·UTM |
-| 루프가 만든 추적 착지 세션 | 0 | **100+** | 커뮤니티 리퍼러 + `utm_campaign=gtm_7d_20261024` |
-| 착지 품질(참여율 / 세션당 페이지뷰) | 비교 링크 89% / 7.0 | 85%+ / 5+ | GA4 |
-| 재방문율 | 3.8% | 6% | `return_visit` |
-| 허용 채널 맞춤 답변 | 0 | 하루 최대 3건 · 7일 15~20건 | 큐 `posted` |
-| 사람 검수 비율 | 100% | 20% 이하 (Claude 판정·심사 후) | 큐 상태 |
-| 정책 위반·삭제·서비스 회귀 | — | 0 | 큐 `removal_reason`·운영 감시 |
-
-매일 실행 → 판독 → 개선을 [docs/07-loop-log.md](docs/07-loop-log.md)에 남긴다.
 
 ## 오늘 실측 (2026-10-24, 게시 없이 실행)
 
@@ -150,19 +181,7 @@ https://reevl.co.kr/c/ZaFYk94S (제가 만든 서비스라 참고만 하세요)
 
 ## 결과
 
-7일 측정이 진행 중이다(2026-10-24 시작). 아래는 시작 전 기준값이다(GA4 사람 필터, 2026-10-24 재조회).
-
-| 지표 | 기준값 (10/17~23) | 7일 목표 |
-|---|---:|---:|
-| 캠페인 추적 외부 착지 세션 | 0 | 최소 30 / 목표 100 |
-| 네이버 외 외부 유입 | 주 66명 | 증가분으로 판정 |
-| 세션당 페이지뷰 | 2.28 | 2.5 |
-| 평균 세션 시간 | 87.5초 | 95초 |
-| 재방문율 | 3.8% | 6% |
-| 규칙 근거가 있는 유용한 답변 | 0 | 최소 8 / 목표 15 |
-| 삭제·신고·서비스 회귀 | — | 0 |
-
-일별 숫자는 [results/daily-log.md](results/daily-log.md)에 적는다. 성과가 나오기 전에는 성과를 주장하지 않는다.
+7일 측정 진행 중(2026-10-24 18:00 시작). 목표는 맨 위 **7-Day Goals** 표 하나를 기준으로 한다. 기준값의 출처·정의는 [docs/01-baseline.md](docs/01-baseline.md), 일별 숫자는 [results/daily-log.md](results/daily-log.md), 매일의 개선은 [docs/07-loop-log.md](docs/07-loop-log.md)에 적는다. 성과가 나오기 전에는 성과를 주장하지 않는다.
 
 ## 다음 단계
 
@@ -172,6 +191,7 @@ https://reevl.co.kr/c/ZaFYk94S (제가 만든 서비스라 참고만 하세요)
 ## 크레딧
 
 - 데이터: [리블](https://reevl.co.kr) 공개 MCP API(국토교통부 실거래가 등 공공데이터 기반)
-- 검색: 네이버 검색 API(카페글·지식iN), 카카오 다음 검색 API
+- 검색: NAVER API HUB 검색(카페글·지식iN·블로그), 카카오 다음 검색 API(카페·웹 `site:` 커뮤니티), YouTube Data API v3, 뽐뿌 RSS
+- 판정·심사(D1~): Claude Haiku 5.5 · Sonnet 5.5 (Messages·Batch API, 하루 $2 상한)
 - 게시: Aside 브라우저 CLI
 - 행사: Clone Loop Day in Seoul — Clone, OpenAI, NAVER D2SF, Deepest
