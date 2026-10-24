@@ -1,0 +1,16 @@
+# 자격 증명·비밀 — 절대 올리지 않는다
+.env
+.env.*
+*.pem
+*credentials*.json
+*service-account*.json
+secrets/
+
+# 원본 분석 데이터 — 리퍼러에 외부 토큰이 섞인다
+data/
+raw/
+*.csv
+
+__pycache__/
+.venv/
+.DS_Store
