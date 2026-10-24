@@ -1,0 +1,38 @@
+candidate_id,channel,source_url,found_at,intent,rule_url,rule_checked_at,allowed,score,response_owner,evidence_url,placement_id,posted_url,status,removal_reason,title,where,query,provider,draft,link,draft_hash,why,posted_at
+a1b2c3d4,naver_cafe,https://cafe.naver.com/example/101,2026-10-24 16:40,compare,,,True,10,,,naver_cafe-1024-1,,ready,,[예시] 오금동 삼성 vs 상아2차 실거주 고민,예시 부동산 카페,송파 리모델링 단지 비교,naver_cafe,"리블(reevl.co.kr)을 운영하고 있어 관계를 먼저 밝힙니다.
+삼성 · 상아2차아파트 — 같은 전용 84㎡ 안팎으로 맞춰 비교해 보면 이렇습니다. [예시 수치]
+- 삼성(오금동): 최근 거래 예시 · 최근 1년 이 면적 거래 n건
+- 상아2차아파트(오금동): 최근 거래 예시 · 최근 1년 이 면적 거래 n건
+거래 시점·층·표본 수가 달라 단순 우열로 볼 수 없습니다.
+두 단지 비교표: https://reevl.co.kr/share/compare?compare=11710%7C%EC%82%BC%EC%84%B1%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C160!11710%7C%EC%83%81%EC%95%842%EC%B0%A8%EC%95%84%ED%8C%8C%ED%8A%B8%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C165&utm_source=naver_cafe&utm_medium=community&utm_campaign=gtm_qa&utm_content=compare
+참고용 통계이며 매수·매도 권유가 아닙니다.",https://reevl.co.kr/share/compare?compare=11710%7C%EC%82%BC%EC%84%B1%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C160!11710%7C%EC%83%81%EC%95%842%EC%B0%A8%EC%95%84%ED%8C%8C%ED%8A%B8%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C165&utm_source=naver_cafe&utm_medium=community&utm_campaign=gtm_qa&utm_content=compare,,,
+b2c3d4e5,naver_cafe,https://cafe.naver.com/example/102,2026-10-24 16:41,compare,,,True,10,,,naver_cafe-1024-2,https://cafe.naver.com/example/102#comment,posted,,[예시] 리모델링 추진 단지 둘 중 어디가 나을까요,예시 부동산 카페,송파 리모델링,naver_cafe,"리블(reevl.co.kr)을 운영하고 있어 관계를 먼저 밝힙니다.
+삼성 · 상아2차아파트 — 같은 전용 84㎡ 안팎으로 맞춰 비교해 보면 이렇습니다. [예시 수치]
+- 삼성(오금동): 최근 거래 예시 · 최근 1년 이 면적 거래 n건
+- 상아2차아파트(오금동): 최근 거래 예시 · 최근 1년 이 면적 거래 n건
+거래 시점·층·표본 수가 달라 단순 우열로 볼 수 없습니다.
+두 단지 비교표: https://reevl.co.kr/share/compare?compare=11710%7C%EC%82%BC%EC%84%B1%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C160!11710%7C%EC%83%81%EC%95%842%EC%B0%A8%EC%95%84%ED%8C%8C%ED%8A%B8%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C165&utm_source=naver_cafe&utm_medium=community&utm_campaign=gtm_qa&utm_content=compare
+참고용 통계이며 매수·매도 권유가 아닙니다.",https://reevl.co.kr/share/compare?compare=11710%7C%EC%82%BC%EC%84%B1%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C160!11710%7C%EC%83%81%EC%95%842%EC%B0%A8%EC%95%84%ED%8C%8C%ED%8A%B8%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C165&utm_source=naver_cafe&utm_medium=community&utm_campaign=gtm_qa&utm_content=compare,,,2026-10-24 16:50
+c3d4e5f6,naver_kin,https://kin.naver.com/example/201,2026-10-24 16:42,school,,,True,9,,,naver_kin-1024-3,,needs_human,,[예시] 오륜중 배정되는 아파트가 어디인가요,지식iN,오륜중 배정 아파트,naver_kin,"리블(reevl.co.kr)을 운영하고 있어 관계를 먼저 밝힙니다.
+삼성 · 상아2차아파트 — 같은 전용 84㎡ 안팎으로 맞춰 비교해 보면 이렇습니다. [예시 수치]
+- 삼성(오금동): 최근 거래 예시 · 최근 1년 이 면적 거래 n건
+- 상아2차아파트(오금동): 최근 거래 예시 · 최근 1년 이 면적 거래 n건
+거래 시점·층·표본 수가 달라 단순 우열로 볼 수 없습니다.
+두 단지 비교표: https://reevl.co.kr/midschool/%EC%98%A4%EB%A5%9C%EC%A4%91?utm_source=naver_kin&utm_medium=community&utm_campaign=gtm_qa&utm_content=hub
+참고용 통계이며 매수·매도 권유가 아닙니다.",https://reevl.co.kr/midschool/%EC%98%A4%EB%A5%9C%EC%A4%91?utm_source=naver_kin&utm_medium=community&utm_campaign=gtm_qa&utm_content=hub,,naver_kin 자동 게시는 v0 미지원 — 사람 게시,
+d4e5f6a7,daum_cafe,https://cafe.daum.net/example/301,2026-10-24 16:43,compare,,,False,7,,,daum_cafe-1024-4,,skip,,[예시] 송파구 건물 급매,예시 다음 카페,송파 리모델링,daum_cafe,,,,no_match,
+e5f6a7b8,ppomppu,https://www.ppomppu.co.kr/example/401,2026-10-24 16:44,compare,,,False,8,,,ppomppu-1024-5,,needs_human,,[예시] 역세권 84㎡ 두 단지 비교 부탁드려요,뽐뿌 부동산포럼,역세권 아파트 비교,ppomppu,"리블(reevl.co.kr)을 운영하고 있어 관계를 먼저 밝힙니다.
+삼성 · 상아2차아파트 — 같은 전용 84㎡ 안팎으로 맞춰 비교해 보면 이렇습니다. [예시 수치]
+- 삼성(오금동): 최근 거래 예시 · 최근 1년 이 면적 거래 n건
+- 상아2차아파트(오금동): 최근 거래 예시 · 최근 1년 이 면적 거래 n건
+거래 시점·층·표본 수가 달라 단순 우열로 볼 수 없습니다.
+두 단지 비교표: https://reevl.co.kr/share/compare?compare=11710%7C%EC%82%BC%EC%84%B1%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C160!11710%7C%EC%83%81%EC%95%842%EC%B0%A8%EC%95%84%ED%8C%8C%ED%8A%B8%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C165&utm_source=naver_cafe&utm_medium=community&utm_campaign=gtm_qa&utm_content=compare
+참고용 통계이며 매수·매도 권유가 아닙니다.",https://reevl.co.kr/share/compare?compare=11710%7C%EC%82%BC%EC%84%B1%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C160!11710%7C%EC%83%81%EC%95%842%EC%B0%A8%EC%95%84%ED%8C%8C%ED%8A%B8%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C165&utm_source=ppomppu&utm_medium=community&utm_campaign=gtm_qa&utm_content=compare,,규칙 미확인 — rules.json에 허용 없음,
+f6a7b8c9,naver_cafe,https://cafe.naver.com/example/103,2026-10-24 16:45,compare,,,True,10,,,naver_cafe-1024-6,,skip,카페 운영자 경고 — 이 카페 게시 중단,[예시] 단지 비교 글 — 운영자 경고로 삭제됨,예시 지역 카페,오금 삼성,naver_cafe,"리블(reevl.co.kr)을 운영하고 있어 관계를 먼저 밝힙니다.
+삼성 · 상아2차아파트 — 같은 전용 84㎡ 안팎으로 맞춰 비교해 보면 이렇습니다. [예시 수치]
+- 삼성(오금동): 최근 거래 예시 · 최근 1년 이 면적 거래 n건
+- 상아2차아파트(오금동): 최근 거래 예시 · 최근 1년 이 면적 거래 n건
+거래 시점·층·표본 수가 달라 단순 우열로 볼 수 없습니다.
+두 단지 비교표: https://reevl.co.kr/share/compare?compare=11710%7C%EC%82%BC%EC%84%B1%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C160!11710%7C%EC%83%81%EC%95%842%EC%B0%A8%EC%95%84%ED%8C%8C%ED%8A%B8%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C165&utm_source=naver_cafe&utm_medium=community&utm_campaign=gtm_qa&utm_content=compare
+참고용 통계이며 매수·매도 권유가 아닙니다.",https://reevl.co.kr/share/compare?compare=11710%7C%EC%82%BC%EC%84%B1%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C160!11710%7C%EC%83%81%EC%95%842%EC%B0%A8%EC%95%84%ED%8C%8C%ED%8A%B8%7C%EC%98%A4%EA%B8%88%EB%8F%99%7C165&utm_source=naver_cafe&utm_medium=community&utm_campaign=gtm_qa&utm_content=compare,,,
+a7b8c9d0,naver_blog,https://blog.naver.com/example/501,2026-10-24 16:46,hub,,,False,6,,,naver_blog-1024-7,,skip,,[예시] 우리 동네 학교 이야기,네이버 블로그,귀인중 배정 아파트,naver_blog,,,,점수 미달(6),

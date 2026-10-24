@@ -1,0 +1,161 @@
+"""전 과정 — 찾기 → 매칭 → 초안 → 점수 → 큐 → (허용 채널이면) Aside 게시 → 실패하면 사람 대기열.
+
+자동 게시 조건(전부 만족해야 한다):
+- publish=True (기본 False — 기본 실행은 초안·큐까지만)
+- 점수 8점 이상이고 규칙 점수 2점(data/rules.json에 그 채널·그 카페가 allowed=true로 확인돼 있음)
+- 오늘(KST) 게시 수 < daily_cap(기본 3), 같은 카페(where)는 하루 1건
+- 같은 초안 문구를 다시 쓰지 않는다(초안 해시)
+rules.json이 없으면 규칙 점수가 전부 0이라 자동 게시는 0건이고, 모든 후보가 사람 대기열로 간다.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import urllib.parse
+import urllib.request
+from datetime import datetime
+
+import re
+
+from . import config, poster, queue, reply
+from .queue import KST
+
+# 질문 신호 — 묻는 글에만 답한다. 광고 신호 — 중개 매물·분양 홍보 글은 건너뛴다.
+QUESTION = re.compile(r"\?|？|고민|어디|어떤가요|어떨까요|괜찮|추천|vs|VS|비교|질문|문의|궁금|조언|선택|어느")
+AD = re.compile(r"급매|매물|분양\s*문의|상담\s*문의|공인중개|중개사무소|입주자\s*모집|모델하우스|☎|010-\d")
+
+SAMPLE_RULES = {"naver_cafe": {"<카페명>": {"allowed": True, "rule_url": "<게시판 공지 URL>", "checked_at": "YYYY-MM-DD"}}}
+
+
+def load_rules(path: str) -> dict:
+    if not os.path.exists(path):
+        return {}
+    try:
+        return json.load(open(path, encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def rule_score(rules: dict, channel: str, where: str) -> tuple[int, str]:
+    r = (rules.get(channel) or {}).get(where or "")
+    if r and r.get("allowed") is True:
+        return 2, r.get("rule_url", "")
+    return 0, ""
+
+
+def fresh_score(rank) -> int:
+    try:
+        rank = int(rank)
+    except (TypeError, ValueError):
+        return 0
+    return 2 if rank < 5 else 1 if rank < 15 else 0
+
+
+def notify(row: dict) -> None:
+    """사람 대기열 알림 — 텔레그램 키가 있으면 보내고, 없으면 콘솔. 토큰은 출력하지 않는다."""
+    msg = f"[리블 GTM 사람 게시 필요] {row.get('channel')} · {row.get('where')}\n{row.get('source_url')}\n사유: {row.get('why') or row.get('status')}\n\n{row.get('draft')}"
+    tok, chat = config.get("TELEGRAM_BOT_TOKEN"), config.get("TELEGRAM_CHAT_ID")
+    if tok and chat:
+        try:
+            data = urllib.parse.urlencode({"chat_id": chat, "text": msg[:3900], "disable_web_page_preview": "true"}).encode()
+            urllib.request.urlopen(f"https://api.telegram.org/bot{tok}/sendMessage", data=data, timeout=15)
+            return
+        except Exception as e:
+            print(f"  (텔레그램 알림 실패: {type(e).__name__}) — 콘솔로 대신 출력")
+    print("\n" + msg + "\n")
+
+
+def _search(queries: list[str], providers: list[str] | None) -> list[dict]:
+    from . import discover
+    if hasattr(discover, "search_all"):
+        return discover.search_all(queries, providers)
+    out = []
+    for q in queries:                                 # 폴백: 네이버 카페만
+        for it in discover.search(q, "naver_cafe"):
+            it.setdefault("provider", "naver")
+            out.append(it)
+    return out
+
+
+def _today_posts(rows: list[dict]) -> list[dict]:
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    return [r for r in rows if r.get("status") == "posted" and (r.get("posted_at") or "").startswith(today)]
+
+
+def run(queries: list[str], providers: list[str] | None = None, publish: bool = False, daily_cap: int = 3,
+        rules_path: str = "data/rules.json", qa: bool = False, notify_human: bool = True) -> dict:
+    rules = load_rules(rules_path)
+    found = _search(queries, providers)
+    summary = {"found": len(found), "matched": 0, "ready": 0, "posted": 0, "needs_human": 0, "skip": 0, "dup": 0}
+    for it in found:
+        rows = queue.load()
+        url = it.get("url", "")
+        if not url or any(r["source_url"] == url for r in rows):
+            summary["dup"] += 1
+            continue
+        channel = it.get("channel") or "naver_cafe"
+        where = it.get("where", "")
+        placement = f"{channel}-{datetime.now(KST):%m%d}-{len(rows) + 1}"
+        base = {"channel": channel, "source_url": url, "title": it.get("title", ""), "where": where,
+                "query": it.get("query", ""), "provider": it.get("provider", ""), "placement_id": placement,
+                "intent": "compare"}
+        text = f"{it.get('title', '')}\n{it.get('desc', '')}"
+        # ★질문 글만 답한다. 다음 카페 실측(10-24): 중개 매물 광고 글이 단지 이름으로 걸려 사람 대기열을 채웠다.
+        if not QUESTION.search(text) or AD.search(text):
+            queue.append({**base, "status": "skip", "removal_reason": "not_question"})
+            summary["skip"] += 1
+            continue
+        # 같은 카페는 한 번 실행에 한 글만 사람에게 넘긴다(도배 방지 — 게시 상한과 별개).
+        if where and any(r.get("where") == where and r.get("status") in ("ready", "needs_human")
+                         and r.get("found_at", "")[:10] == datetime.now(KST).strftime("%Y-%m-%d") for r in rows):
+            queue.append({**base, "status": "skip", "removal_reason": "same_cafe_today"})
+            summary["skip"] += 1
+            continue
+        res = reply.build(text, channel, placement, qa)
+        if not res.get("ok"):
+            queue.append({**base, "status": "skip", "removal_reason": "no_match", "why": res.get("why", "")})
+            summary["skip"] += 1
+            continue
+        summary["matched"] += 1
+        rs, rule_url = rule_score(rules, channel, where)
+        fr = fresh_score(it.get("rank"))
+        s, allowed = queue.score(res["fit"], res["data"], fr, rs)
+        h = hashlib.sha1(res["text"].encode()).hexdigest()[:12]
+        row = {**base, "score": s, "allowed": allowed, "rule_url": rule_url,
+               "fit": res["fit"], "data": res["data"], "fresh": fr, "rule": rs,
+               "rule_checked_at": (rules.get(channel) or {}).get(where, {}).get("checked_at", "") if rs else "",
+               "draft": res["text"], "link": res["links"][0], "draft_hash": h}
+        if any(r.get("draft_hash") == h for r in rows):
+            queue.append({**row, "status": "skip", "removal_reason": "same_draft"})
+            summary["skip"] += 1
+            continue
+        posted_today = _today_posts(rows)
+        cap_ok = len(posted_today) < daily_cap and not any(r.get("where") == where for r in posted_today)
+        if allowed and publish and cap_ok:
+            out = poster.post(channel, url, res["text"], dry=False)
+            if out.get("ok") and out.get("mode") == "posted":
+                queue.append({**row, "status": "posted", "posted_url": out.get("url", url),
+                              "posted_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M")})
+                summary["posted"] += 1
+            else:
+                r_ = queue.append({**row, "status": "needs_human", "why": out.get("why", "게시 실패")})
+                summary["needs_human"] += 1
+                if notify_human:
+                    notify(r_)
+        elif allowed and not publish:
+            queue.append({**row, "status": "ready", "why": "publish 꺼짐 — 초안까지"})
+            summary["ready"] += 1
+        elif s - rs < 6:
+            # ★내용 점수(적합도+데이터+최신성, 만점 8)가 6 미만이면 사람에게도 넘기지 않는다.
+            #   다음 카페 실측(10-24): 무관한 글이 허브 이름 하나로 걸려 사람 대기열 42건이 쌓였다.
+            queue.append({**row, "status": "skip", "removal_reason": "low_score", "why": f"내용 점수 {s - rs} < 6"})
+            summary["skip"] += 1
+        else:
+            why = ("규칙 미확인 채널 — 사람이 규칙 확인 후 게시" if rs < 2 else
+                   "오늘 상한 도달" if not cap_ok else f"점수 {s} < 8")
+            r_ = queue.append({**row, "status": "needs_human", "why": why})
+            summary["needs_human"] += 1
+            if notify_human and publish:
+                notify(r_)
+    return summary

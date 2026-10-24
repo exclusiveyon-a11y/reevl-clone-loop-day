@@ -1,0 +1,11 @@
+{
+  "naver_cafe": {
+    "예시카페": {"allowed": false, "rule_url": "", "checked_at": ""}
+  },
+  "naver_kin": {
+    "지식iN": {"allowed": false, "rule_url": "", "checked_at": ""}
+  },
+  "daum_cafe": {
+    "예시카페": {"allowed": false, "rule_url": "", "checked_at": ""}
+  }
+}

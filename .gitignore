@@ -1,13 +1,15 @@
 # 자격 증명·비밀 — 절대 올리지 않는다
 .env
 .env.*
+!.env.example
 *.pem
 *credentials*.json
 *service-account*.json
 secrets/
 
-# 원본 분석 데이터 — 리퍼러에 외부 토큰이 섞인다
+# 운영 파일 — 큐·규칙·캐시·원본 분석 데이터(리퍼러에 외부 토큰이 섞인다)
 data/
+rules.json
 raw/
 *.csv
 

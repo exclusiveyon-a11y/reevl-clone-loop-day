@@ -68,13 +68,15 @@ def main() -> None:
     ev = lambda name: {"filter": {"fieldName": "eventName", "stringFilter": {"value": name}}}
     lp = lambda p: {"filter": {"fieldName": "landingPage", "stringFilter": {"matchType": "BEGINS_WITH", "value": p}}}
     src = lambda s: {"filter": {"fieldName": "sessionSource", "stringFilter": {"value": s}}}
-    camp = {"filter": {"fieldName": "sessionCampaignName", "stringFilter": {"value": "gtm7"}}}
+    camp = {"filter": {"fieldName": "sessionCampaignName", "stringFilter": {"value": "gtm_7d_20261024"}}}
+    qa = {"filter": {"fieldName": "sessionCampaignName", "stringFilter": {"value": "gtm_qa"}}}
     quality = ["sessions", "engagementRate", "averageSessionDuration", "screenPageViewsPerSession", "bounceRate"]
 
     reports = [
         ("전체 질", [], quality, []),
         ("일별", ["date"], ["activeUsers", "sessions", "screenPageViews", "averageSessionDuration", "engagementRate"], []),
-        ("gtm7 캠페인 출처별", ["sessionSource", "sessionMedium", "sessionManualAdContent"], quality, [camp]),
+        ("캠페인 gtm_7d_20261024 출처·위치별", ["sessionSource", "sessionMedium", "sessionManualAdContent", "sessionManualTerm"], quality, [camp]),
+        ("테스트 gtm_qa (실험 집계에서 제외)", ["sessionSource", "sessionManualAdContent"], quality, [qa]),
         ("공유 이벤트", ["eventName"], ["eventCount", "totalUsers"], [ev("share")]),
         ("재방문 이벤트", ["eventName"], ["eventCount", "totalUsers"], [ev("return_visit")]),
         ("관심 저장", ["eventName"], ["eventCount", "totalUsers"], [ev("save_item")]),
