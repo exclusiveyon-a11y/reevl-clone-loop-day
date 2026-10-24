@@ -22,15 +22,20 @@ const URL = {json.dumps(url)}; const TEXT = {json.dumps(text, ensure_ascii=False
 const R = (o) => console.log('RESULT ' + JSON.stringify(o));
 const p = await openTab(URL);
 await sleep(5000);
-const frames = [p.mainFrame(), ...p.frames()];
+// ★카페 본문은 cafe_main iframe 안이다 — 그 프레임을 먼저 본다. count()에 .catch를 잇지 않는다(Aside 런타임 미지원).
+const all = [...p.frames(), p.mainFrame()];
+const frames = [...all.filter(x => x.name() === 'cafe_main'), ...all.filter(x => x.name() !== 'cafe_main')];
 let f = null, box = null;
 for (const fr of frames) {{
-  const b = fr.locator('textarea.comment_inbox_text, textarea[placeholder*="댓글"]');
-  if (await b.count().catch(() => 0)) {{ f = fr; box = b.first(); break; }}
+  let n = 0;
+  try {{ n = await fr.locator('textarea.comment_inbox_text, textarea[placeholder*="댓글"]').count(); }} catch (e) {{ n = 0; }}
+  let nb = 0;
+  try {{ nb = await fr.locator('a.btn_register, button.btn_register').count(); }} catch (e) {{ nb = 0; }}
+  if (n && nb) {{ f = fr; box = fr.locator('textarea.comment_inbox_text, textarea[placeholder*="댓글"]').first(); break; }}
 }}
 if (!box) {{ R({{ok:false, why:'댓글 칸 없음 — 가입·등급 제한이거나 로그인이 풀렸다'}}); }}
 else {{
-  const btn = f.locator('a.btn_register, button.btn_register, a:has-text("등록"), button:has-text("등록")').first();
+  const btn = f.locator('a.btn_register, button.btn_register').first();
   if (!(await btn.count())) {{ R({{ok:false, why:'등록 버튼 없음'}}); }}
   else if (DRY) {{ R({{ok:true, mode:'dry', url:p.url()}}); }}
   else {{
@@ -40,11 +45,11 @@ else {{
       if (line) await p.keyboard.type(line, {{delay: 5}});
     }}
     await sleep(800);
-    const typed = await box.inputValue().catch(() => '');
+    let typed = ''; try {{ typed = await box.inputValue(); }} catch (e) {{}}
     if (!typed.includes(TEXT.slice(0, 12))) {{ R({{ok:false, why:'입력이 안 들어갔다'}}); }}
     else {{
       await btn.click(); await sleep(3500);
-      const body = await f.locator('body').innerText().catch(() => '');
+      let body = ''; try {{ body = await f.locator('body').innerText(); }} catch (e) {{}}
       R(body.includes(TEXT.slice(0, 20)) ? {{ok:true, mode:'posted', url:p.url()}}
                                         : {{ok:false, why:'등록 후 댓글이 안 보인다 — 사람 확인 필요'}});
     }}

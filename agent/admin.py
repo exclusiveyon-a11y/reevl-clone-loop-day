@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import claude as _claude
 from . import queue
 
 KST = timezone(timedelta(hours=9))
@@ -125,6 +126,7 @@ def status() -> dict:
             run = None
     return {"run": run, "naver": naver_info(), "rules": rules_info(), "cap": DAILY_CAP, "demo": DEMO,
             "sources": {"naver": naver_info(), "daum": _count(DAUM_CALLS, 500), "youtube": _count(YT_UNITS, 3000)},
+            "claude": {**_claude.spent(), "on": bool(_claude.available())},
             "at": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")}
 
 
@@ -217,7 +219,7 @@ PAGE = r"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
   --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
   /* 관제 콘솔 면 — 테마와 무관하게 한 톤 더 깊게 */
   --console:#0b0c10;--c-line:#1b1e25;--c-text:#c9cdd4;--c-dim:#6f7784;--c-time:#5d6572;
-  --c-brand:#6cb0ff;--c-match:#b8a5ff;--c-pass:#34d8a6;--c-warn:#f0b254;--c-neg:#ff7b85;--c-gray:#8b93a1;
+  --c-brand:#6cb0ff;--c-match:#b8a5ff;--c-ai:#d4a8ff;--c-pass:#34d8a6;--c-warn:#f0b254;--c-neg:#ff7b85;--c-gray:#8b93a1;
   color-scheme:dark;
 }
 :root[data-theme=light]{
@@ -346,6 +348,9 @@ button,input,select{font:inherit;color:inherit}
 .title .ico{margin-top:2px;color:var(--dim)}
 .meta{display:flex;flex-wrap:wrap;gap:4px 12px;color:var(--dim)}
 .why{display:flex;gap:6px;align-items:flex-start;color:var(--warn-strong)}
+.ai{display:flex;gap:8px;align-items:flex-start;color:var(--sub)}
+.ai .aic{flex:none;display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 8px;font-weight:700;background:color-mix(in srgb,#b18cff 18%,transparent);color:#c9a9ff}
+.ai .aic.no{background:color-mix(in srgb,var(--up) 16%,transparent);color:var(--up)}
 .why.neg{color:var(--up)}
 .match{display:flex;align-items:center;gap:8px;min-width:0;background:var(--app);border-radius:var(--radius-lg);padding:8px 10px}
 .match .kind{flex:none;background:var(--brand-soft);color:var(--brand);border-radius:var(--radius-sm);padding:2px 6px;font-weight:700}
@@ -459,7 +464,7 @@ button,input,select{font:inherit;color:inherit}
 .ln .tm{color:var(--c-time)}.ln .tx{overflow:hidden;text-overflow:ellipsis;color:var(--c-text)}
 .ln .tg{font-weight:700}
 .tg.k-found{color:var(--c-brand)}.tg.k-check{color:var(--c-dim)}.tg.k-match{color:var(--c-match)}.tg.k-score{color:var(--c-text)}
-.tg.k-pass{color:var(--c-pass)}.tg.k-run{color:var(--c-pass)}.tg.k-skipg{color:var(--c-gray)}.tg.k-skipo{color:var(--c-warn)}.tg.k-skipr{color:var(--c-neg)}
+.tg.k-ai{color:var(--c-ai)}.tg.k-pass{color:var(--c-pass)}.tg.k-run{color:var(--c-pass)}.tg.k-skipg{color:var(--c-gray)}.tg.k-skipo{color:var(--c-warn)}.tg.k-skipr{color:var(--c-neg)}
 .ln.pass .tx{color:var(--c-pass)}
 .ln.typ .tx{animation:typ .4s steps(24,end)}
 @keyframes typ{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
@@ -578,7 +583,7 @@ button,input,select{font:inherit;color:inherit}
 const TOKEN="__TOKEN__", DEMO=__DEMO__;
 const ST={needs_human:"사람 확인",ready:"게시 대기",posted:"게시됨",skip:"제외",removed:"삭제·신고"};
 const PROV={naver_cafe:"네이버 카페",naver_kin:"지식iN",naver_blog:"네이버 블로그",daum_cafe:"다음 카페",daum_web:"다음 웹",ppomppu:"뽐뿌",ppomppu_web:"뽐뿌",clien:"클리앙",dcinside:"디시",fmkorea:"에펨코리아",theqoo:"더쿠",blind:"블라인드",mlbpark:"엠팍",bobaedream:"보배드림",ruliweb:"루리웹",daangn:"당근",youtube:"유튜브",community:"커뮤니티",copy:"복사",web_share:"공유"};
-const WHY={not_question:"질문 글 아님",low_score:"내용 점수 미달",no_match:"리블 페이지 매칭 없음",same_cafe_today:"같은 카페 오늘 이미",error:"조회 오류",same_draft:"같은 문구",dup:"중복"};
+const WHY={not_question:"질문 글 아님",low_score:"내용 점수 미달",no_match:"리블 페이지 매칭 없음",same_cafe_today:"같은 카페 오늘 이미",error:"조회 오류",same_draft:"같은 문구",dup:"중복",ai_reject:"AI 판정 제외"};
 const KIND={compare:"비교",complex:"단지",hub:"허브",housing:"유형",screener:"조건"};
 const ORDER={needs_human:0,ready:1,posted:2,removed:3,skip:4};
 let DATA={rows:[]}, STATUS=null, FS="", SHOW_SKIP=false;
@@ -679,6 +684,7 @@ function card(r){
   ${src?`<a class="title t-title" href="${esc(src)}" target="_blank" rel="noopener">${esc(r.title||"(제목 없음)")}${ic("ext")}</a>`:`<span class="title t-title">${esc(r.title||"(제목 없음)")}</span>`}
   <div class="meta t-cap"><span>검색어 ${esc(r.query||"-")}</span><span class="num">발견 ${esc(String(r.found_at||"-").slice(5))}</span>${r.placement_id?`<span class="num">${esc(r.placement_id)}</span>`:""}${r.posted_at?`<span class="num">게시 ${esc(r.posted_at)}</span>`:""}</div>
   ${whyTxt?`<div class="why t-cap ${s==="removed"?"neg":""}">${ic("alert")}<span>${esc(whyTxt)}</span></div>`:""}
+  ${(r.ai_triage||r.ai_review)?`<div class="ai t-cap"><span class="aic ${(r.removal_reason==="ai_reject"||(r.ai_review&&r.ai_review!=="통과"))?"no":""} t-micro">AI 판정${r.ai_conf?` ${esc(r.ai_conf)}`:""}</span><span>${esc([r.ai_triage,r.ai_review&&r.ai_review!=="통과"?"심사: "+r.ai_review:(r.ai_review?"심사 통과":"")].filter(Boolean).join(" · "))}</span></div>`:""}
   ${link?`<div class="match t-cap"><span class="kind t-micro">${esc(linkKind(link))}</span>${ic("link","dim")}<a href="${esc(link)}" target="_blank" rel="noopener" title="${esc(link)}">${esc(linkLabel(link))}</a></div>`:""}
   ${r.draft?`<pre class="draft t-body">${esc(r.draft)}</pre>`:""}
   ${r.status==="skip"?"":`<div class="acts">
@@ -726,7 +732,7 @@ function ask(label,ph){return new Promise(res=>{const d=document.createElement("
 const RM=matchMedia("(prefers-reduced-motion: reduce)").matches;
 const STG=[["search","검색"],["q","질문 판정"],["m","매칭"],["d","초안"],["s","점수"],["c","분류"]];
 const STEP=[["q","질문 판정"],["m","매칭"],["d","초안"],["s","점수"],["r","결과"]];
-const RTONE={not_question:"g",same_cafe_today:"g",no_match:"o",error:"o",low_score:"r",same_draft:"r"};
+const RTONE={not_question:"g",same_cafe_today:"g",no_match:"o",error:"o",low_score:"r",same_draft:"r",ai_reject:"o"};
 const RCOL={g:"var(--dim)",o:"var(--warn)",r:"var(--up)"};
 let EV_LAST=0,EV_ALL=[],PQ=[],SPEED=1,PUMPING=false,RUNKEY=null,FIRST=true,HOLD=false,TF="",REV=false;
 let CNT,RC,PASS,DRAFT,URLS,RUN,DONE_T,FOC;
@@ -742,6 +748,9 @@ function renderTop(){const live=!!(DEMO||(STATUS&&STATUS.run&&STATUS.run.running
   const so=(STATUS&&STATUS.sources)||{};
   $("#schips").innerHTML=[["네이버",so.naver,"회"],["다음",so.daum,"회"],["유튜브",so.youtube,"단위"]].filter(x=>x[1]).map(([n,v,u])=>{const pc=v.cap?Math.min(100,v.today/v.cap*100):0;
     return `<span class="sc t-cap" title="오늘 ${fmt(v.today)}/${fmt(v.cap)}${u}">${n} <b class="num">${fmt(v.today)}</b><span class="num">/${fmt(v.cap)}</span><span class="mt"><i style="width:${pc}%"></i></span></span>`}).join("");
+  const cl=STATUS&&STATUS.claude;if(cl&&cl.on){const pc=cl.daily_cap?Math.min(100,cl.today/cl.daily_cap*100):0;
+    const ex=String(cl.expires||"").slice(5).replace("-","/").replace(/^0/,"");const mods=Object.entries(cl.models||{}).map(([m,v])=>`${m.replace("claude-","")} $${v.toFixed(3)}`).join(" · ");
+    $("#schips").insertAdjacentHTML("beforeend",`<span class="sc t-cap" title="${esc(mods||"모델별 누계 없음")}">Claude 오늘 <b class="num">$${cl.today.toFixed(2)}</b><span class="num">/ $${cl.daily_cap}</span> · 누계 <b class="num">$${cl.total.toFixed(2)}</b><span class="num">/ $${cl.total_cap}</span>${ex?` · 만료 ${esc(ex)}`:""}<span class="mt"><i style="width:${pc}%"></i></span></span>`)}
   const now=performance.now();DONE_T=DONE_T.filter(t=>now-t<10000);
   $("#rate").textContent=DONE_T.length?`${(DONE_T.length/10).toFixed(1)}건/초`:"";
   $("#replayBtn").hidden=!(RUN.ended&&EV_ALL.length);
@@ -794,6 +803,10 @@ function apply(ev,anim){
      log("MATCH","match",`${esc([...(ev.complexes||[]),...(ev.hubs||[])].join(" · ")||"-")} (${esc(ev.kind||"")})`,ev,anim);flowDot("d");break;
    case "score":CNT.d++;if(FOC&&FOC.id===ev.id){FOC.st.d="ok";FOC.st.s="act";FOC.stage="s";FOC.bars={fit:ev.fit,data:ev.data,fresh:ev.fresh,rule:ev.rule,total:ev.total};FOC.anim=anim;renderFocus(FOC)}
      log("SCORE","score",`적합${ev.fit} 데이터${ev.data} 최신${ev.fresh} 규칙${ev.rule} = ${ev.total}`,ev,anim);flowDot("s");break;
+   case "ai_triage":log("AI_TRIAGE","ai",`${ev.ok?"질문·관련·적절 ✓":"제외 판단"}  확신 ${esc(ev.confidence)}  · ${esc(excerpt(ev.reason||"",48))}`,ev,anim);break;
+   case "ai_extract":log("AI_EXTRACT","ai",`${esc([...(ev.complexes||[])].join(" · ")||"단지 없음")}${ev.gu||ev.dong?`  @ ${esc([ev.gu,ev.dong].filter(Boolean).join(" "))}`:""}  · ${esc(ev.concern||"")}${ev.purpose?"/"+esc(ev.purpose):""}`,ev,anim);break;
+   case "ai_draft":log("AI_DRAFT","ai",ev.ok?`Sonnet 초안 ${fmt(ev.chars)}자`:`Sonnet 초안 실패 → 규칙 초안${ev.error?" ("+esc(ev.error)+")":""}`,ev,anim);break;
+   case "ai_review":log("AI_REVIEW","ai",ev.ok?`통과 (${esc(ev.by||"")} 심사 · ${esc(ev.draft_by||"")} 초안)`:`걸림 (${esc(ev.by||"")}) · ${esc(excerpt((ev.issues||[]).join("; "),48))}`,ev,anim);break;
    case "result":{const pass=["needs_human","ready","posted"].includes(ev.status);
      if(pass){CNT.s++;CNT.c++;DRAFT[ev.id]=ev.draft||"";PASS.unshift({id:ev.id,title:FOC&&FOC.id===ev.id?FOC.title:"",channel:FOC&&FOC.channel,draft:ev.draft||""});renderPass();flowDot("c","pass");
        log("PASS","pass",`→ ${esc(ST[ev.status]||ev.status)}  ${ev.score!==""?esc(ev.score)+"점":""}`,ev,anim);
@@ -811,7 +824,7 @@ function apply(ev,anim){
   }
   renderStages();renderTop();
 }
-const DELAY={found:420,question:300,match:420,score:480,result:620};
+const DELAY={found:420,question:300,match:420,score:480,ai_triage:420,ai_extract:420,ai_draft:420,ai_review:420,result:620};
 function pump(){if(PUMPING)return;PUMPING=true;
   const step=()=>{if(SPEED===0){PUMPING=false;return}
     let ev=PQ.shift();if(!ev){PUMPING=false;renderTop();return}

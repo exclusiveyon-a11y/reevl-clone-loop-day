@@ -16,7 +16,8 @@ PATH = os.environ.get("GTM_QUEUE", "data/queue.csv")
 FIELDS = ["candidate_id", "channel", "source_url", "found_at", "intent", "rule_url", "rule_checked_at",
           "allowed", "score", "response_owner", "evidence_url", "placement_id", "posted_url", "status",
           "removal_reason", "title", "where", "query", "provider", "draft", "link", "draft_hash",
-          "why", "posted_at", "fit", "data", "fresh", "rule"]
+          "why", "posted_at", "fit", "data", "fresh", "rule",
+          "ai_triage", "ai_review", "ai_conf", "ai_cost"]
 
 
 def _now() -> str:

@@ -18,7 +18,7 @@ from datetime import datetime
 
 import re
 
-from . import config, poster, queue, reply
+from . import claude, config, intent, judge, poster, queue, reply
 from .queue import KST
 
 # 질문 신호 — 묻는 글에만 답한다. 광고 신호 — 중개 매물·분양 홍보 글은 건너뛴다.
@@ -136,25 +136,51 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
             _append({**base, "status": "skip", "removal_reason": "same_cafe_today"})
             summary["skip"] += 1
             continue
+        # ── Claude 1·2단계(키·예산이 있을 때만): triage(Haiku) → extract(Sonnet). 실패하면 규칙 흐름 ──
+        ai_used, ai_ok, ai_note, conf, ents, spent_ = False, False, "", 0.0, None, 0.0
+        ai_fields: dict = {}
+        if claude.available():
+            try:
+                tri, c1 = judge.triage(it.get("title", ""), it.get("desc", ""), channel, where, {})
+                spent_ += c1
+                tri_ok = bool(tri.get("is_question") and tri.get("appropriate"))   # 관련성은 추출·매칭 뒤에 판정(매칭 전 triage가 목동 글을 버렸다)
+                conf = float(tri.get("confidence") or 0)
+                _emit('ai_triage', cur['id'], ok=tri_ok, confidence=round(conf, 2), reason=tri.get("reason", ""))
+                ai_fields = {"ai_triage": tri.get("reason", "")[:200], "ai_conf": round(conf, 2), "ai_cost": round(spent_, 6)}
+                ai_used = True
+                if not tri_ok:
+                    _append({**base, **ai_fields, "status": "skip", "removal_reason": "ai_reject", "why": tri.get("reason", "")[:120]})
+                    summary["skip"] += 1
+                    summary["ai_reject"] = summary.get("ai_reject", 0) + 1
+                    continue
+                ents, c2 = judge.extract(it.get("title", ""), it.get("desc", ""))
+                spent_ += c2
+                ai_fields["ai_cost"] = round(spent_, 6)
+                _emit('ai_extract', cur['id'], complexes=(ents.get("complexes") or [])[:3], gu=ents.get("gu", ""),
+                      dong=ents.get("dong", ""), concern=ents.get("concern", ""), purpose=ents.get("purpose", ""))
+            except claude.BudgetExceeded as e:
+                ai_used, ai_note = False, f"AI 건너뜀: {e}"
+            except Exception as e:
+                ai_used, ai_note = False, f"AI 건너뜀: {type(e).__name__}: {str(e)[:60]}"
         try:
-            res = reply.build(text, channel, placement, qa)
+            res = reply.build(text, channel, placement, qa, entities=ents)
         except Exception as e:                 # 한 건의 API 지연이 실행 전체를 끊지 않게
-            _append({**base, "status": "skip", "removal_reason": "error", "why": f"{type(e).__name__}: {str(e)[:80]}"})
+            _append({**base, **ai_fields, "status": "skip", "removal_reason": "error", "why": f"{type(e).__name__}: {str(e)[:80]}"})
             summary["skip"] += 1
             continue
         if not res.get("ok"):
-            _append({**base, "status": "skip", "removal_reason": "no_match", "why": res.get("why", "")})
+            _append({**base, **ai_fields, "status": "skip", "removal_reason": "no_match", "why": res.get("why", "")})
             summary["skip"] += 1
             continue
         summary["matched"] += 1
-        _emit('match', cur['id'], ok=True, kind=res.get('kind', ''), intents=res.get('intents', []),
+        _emit('match', cur['id'], ok=True, kind=res.get('kind', ''), intents=res.get('intents', []), via=res.get('match_via', ''),
               complexes=[c.get('name') for c in res.get('complexes', [])][:3], hubs=[h.get('name') for h in res.get('hubs', [])][:2])
         rs, rule_url = rule_score(rules, channel, where)
         fr = fresh_score(it.get("rank"))
         s, allowed = queue.score(res["fit"], res["data"], fr, rs)
         h = hashlib.sha1(res["text"].encode()).hexdigest()[:12]
         _emit('score', cur['id'], fit=res['fit'], data=res['data'], fresh=fr, rule=rs, total=s)
-        row = {**base, "score": s, "allowed": allowed, "rule_url": rule_url,
+        row = {**base, **ai_fields, "score": s, "allowed": allowed, "rule_url": rule_url,
                "fit": res["fit"], "data": res["data"], "fresh": fr, "rule": rs,
                "rule_checked_at": (rules.get(channel) or {}).get(where, {}).get("checked_at", "") if rs else "",
                "draft": res["text"], "link": res["links"][0], "draft_hash": h}
@@ -162,36 +188,94 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
             _append({**row, "status": "skip", "removal_reason": "same_draft"})
             summary["skip"] += 1
             continue
+        low = (not allowed) and (s - rs < 6)     # 내용 점수 미달은 AI를 더 부르지 않는다(비용 절약)
+        final_text = res["text"]
+        # ── Claude 3·4단계: draft(Sonnet, facts 숫자만) → review(Haiku, 애매하면 Opus 재심). 규칙 초안은 폴백 ──
+        if ai_used and not low:
+            if conf < 0.6:
+                r_ = _append({**row, "status": "needs_human", "why": "AI 확신 낮음 — " + row.get("ai_triage", "")[:80]})
+                summary["needs_human"] += 1
+                new_human.append(r_)
+                continue
+            try:
+                cands = []
+                try:
+                    dr, c3 = judge.draft({"title": it.get("title", ""), "text": it.get("desc", "")}, ents or {},
+                                         res.get("facts", []), channel, res["links"][0], intent.style(channel))
+                    spent_ += c3
+                    _emit('ai_draft', cur['id'], ok=bool(dr.get("text")), chars=len(dr.get("text", "")))
+                    if dr.get("text"):
+                        cands.append(("sonnet", dr["text"]))
+                except claude.BudgetExceeded:
+                    raise
+                except Exception as e:
+                    _emit('ai_draft', cur['id'], ok=False, chars=0, error=type(e).__name__)
+                cands.append(("rule", res["text"]))
+                passed, last = None, None
+                for src, txt in cands:
+                    rev, c4 = judge.review_two_stage(txt, res.get("facts", []), channel)
+                    spent_ += c4
+                    _emit('ai_review', cur['id'], ok=bool(rev.get("pass")), issues=rev.get("issues", [])[:4],
+                          by=rev.get("by", ""), draft_by=src)
+                    last = rev
+                    if rev.get("pass"):
+                        passed = (src, txt)
+                        break
+                row["ai_cost"] = round(spent_, 6)
+                if not passed:
+                    row["ai_review"] = "; ".join((last or {}).get("issues", []))[:200]
+                    r_ = _append({**row, "status": "needs_human", "why": "심사 걸림 — " + row["ai_review"][:100]})
+                    summary["needs_human"] += 1
+                    new_human.append(r_)
+                    continue
+                final_text = passed[1]
+                row.update(draft=final_text, draft_hash=hashlib.sha1(final_text.encode()).hexdigest()[:12],
+                           ai_review=f"통과({passed[0]} 초안 · {last.get('by', '')} 심사)")
+                ai_ok = conf >= 0.75
+            except claude.BudgetExceeded as e:
+                ai_used, ai_note = False, f"AI 건너뜀: {e}"
+            except Exception as e:
+                ai_used, ai_note = False, f"AI 건너뜀: {type(e).__name__}: {str(e)[:60]}"
+        note = f" · {ai_note}" if ai_note else ""
         posted_today = _today_posts(rows)
         cap_ok = len(posted_today) < daily_cap and not any(r.get("where") == where for r in posted_today)
-        if allowed and publish and cap_ok:
-            out = poster.post(channel, url, res["text"], dry=False)
+        if allowed and publish and cap_ok and (ai_ok or not ai_used):
+            out = poster.post(channel, url, final_text, dry=False)
             if out.get("ok") and out.get("mode") == "posted":
                 _append({**row, "status": "posted", "posted_url": out.get("url", url),
                               "posted_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M")})
                 summary["posted"] += 1
             else:
-                r_ = _append({**row, "status": "needs_human", "why": out.get("why", "게시 실패")})
+                r_ = _append({**row, "status": "needs_human", "why": out.get("why", "게시 실패") + note})
                 summary["needs_human"] += 1
                 if notify_human:
                     notify(r_)
-        elif allowed and not publish:
-            _append({**row, "status": "ready", "why": "publish 꺼짐 — 초안까지"})
+                new_human.append(r_)
+        elif allowed and not publish and (ai_ok or not ai_used):
+            _append({**row, "status": "ready", "why": ("AI 승인 · " if ai_ok else "") + "publish 꺼짐 — 초안까지" + note})
             summary["ready"] += 1
-        elif s - rs < 6:
+        elif low:
             # ★내용 점수(적합도+데이터+최신성, 만점 8)가 6 미만이면 사람에게도 넘기지 않는다.
             #   다음 카페 실측(10-24): 무관한 글이 허브 이름 하나로 걸려 사람 대기열 42건이 쌓였다.
             _append({**row, "status": "skip", "removal_reason": "low_score", "why": f"내용 점수 {s - rs} < 6"})
             summary["skip"] += 1
+        elif ai_ok:
+            # AI 판정·추출·작성·심사 통과 — 사람 확인 불필요. 게시는 규칙 허용 채널의 자동 게시 또는 사람이 복사·게시.
+            rule_txt = "규칙 미확인 채널 — 게시는 사람이" if rs < 2 else ("오늘 상한 도달" if not cap_ok else "자동 게시 꺼짐")
+            _append({**row, "status": "ready", "why": f"AI 승인(확신 {row.get('ai_conf')}) · {rule_txt}"})
+            summary["ready"] += 1
         else:
-            why = ("규칙 미확인 채널 — 사람이 규칙 확인 후 게시" if rs < 2 else
+            why = ("AI 확신 0.6~0.75 — 사람 확인" if ai_used else
+                   "규칙 미확인 채널 — 사람이 규칙 확인 후 게시" if rs < 2 else
                    "오늘 상한 도달" if not cap_ok else f"점수 {s} < 8")
-            r_ = _append({**row, "status": "needs_human", "why": why})
+            r_ = _append({**row, "status": "needs_human", "why": why + note})
             summary["needs_human"] += 1
             if notify_human and publish:
                 notify(r_)
             new_human.append(r_)
     summary["human_new"] = len(new_human)
+    den = summary["ready"] + summary["needs_human"]
+    summary["human_rate"] = round(summary["needs_human"] / den, 3) if den else 0.0
     _progress(running=False, total=len(found), processed=len(found), summary=summary, queries=queries)
     _emit('run_end', None, summary=summary)
     if notify_summary and new_human:
