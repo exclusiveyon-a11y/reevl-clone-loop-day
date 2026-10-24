@@ -583,7 +583,7 @@ button,input,select{font:inherit;color:inherit}
 const TOKEN="__TOKEN__", DEMO=__DEMO__;
 const ST={needs_human:"사람 확인",ready:"게시 대기",posted:"게시됨",skip:"제외",removed:"삭제·신고"};
 const PROV={naver_cafe:"네이버 카페",naver_kin:"지식iN",naver_blog:"네이버 블로그",daum_cafe:"다음 카페",daum_web:"다음 웹",ppomppu:"뽐뿌",ppomppu_web:"뽐뿌",clien:"클리앙",dcinside:"디시",fmkorea:"에펨코리아",theqoo:"더쿠",blind:"블라인드",mlbpark:"엠팍",bobaedream:"보배드림",ruliweb:"루리웹",daangn:"당근",youtube:"유튜브",community:"커뮤니티",copy:"복사",web_share:"공유"};
-const WHY={not_question:"질문 글 아님",low_score:"내용 점수 미달",no_match:"리블 페이지 매칭 없음",same_cafe_today:"같은 카페 오늘 이미",error:"조회 오류",same_draft:"같은 문구",dup:"중복",ai_reject:"AI 판정 제외"};
+const WHY={not_question:"질문 글 아님",low_score:"내용 점수 미달",no_match:"리블 페이지 매칭 없음",same_cafe_today:"같은 카페 오늘 이미",error:"조회 오류",same_draft:"같은 문구",dup:"중복",ai_reject:"AI 판정 제외",stale:"오래된 질문",deleted:"삭제된 글",unread:"원문 못 읽음",not_member:"미가입 카페",no_permission:"댓글 권한 없음",audit_live_question:"검수: 질문 글 아님",audit_right_target:"검수: 다른 단지",audit_not_redundant:"검수: 이미 같은 답",audit_fits_board:"검수: 게시판 안 맞음"};
 const KIND={compare:"비교",complex:"단지",hub:"허브",housing:"유형",screener:"조건"};
 const ORDER={needs_human:0,ready:1,posted:2,removed:3,skip:4};
 let DATA={rows:[]}, STATUS=null, FS="", SHOW_SKIP=false;
@@ -684,7 +684,7 @@ function card(r){
   ${src?`<a class="title t-title" href="${esc(src)}" target="_blank" rel="noopener">${esc(r.title||"(제목 없음)")}${ic("ext")}</a>`:`<span class="title t-title">${esc(r.title||"(제목 없음)")}</span>`}
   <div class="meta t-cap"><span>검색어 ${esc(r.query||"-")}</span><span class="num">발견 ${esc(String(r.found_at||"-").slice(5))}</span>${r.placement_id?`<span class="num">${esc(r.placement_id)}</span>`:""}${r.posted_at?`<span class="num">게시 ${esc(r.posted_at)}</span>`:""}</div>
   ${whyTxt?`<div class="why t-cap ${s==="removed"?"neg":""}">${ic("alert")}<span>${esc(whyTxt)}</span></div>`:""}
-  ${(r.ai_triage||r.ai_review)?`<div class="ai t-cap"><span class="aic ${(r.removal_reason==="ai_reject"||(r.ai_review&&r.ai_review!=="통과"))?"no":""} t-micro">AI 판정${r.ai_conf?` ${esc(r.ai_conf)}`:""}</span><span>${esc([r.ai_triage,r.ai_review&&r.ai_review!=="통과"?"심사: "+r.ai_review:(r.ai_review?"심사 통과":"")].filter(Boolean).join(" · "))}</span></div>`:""}
+  ${(r.ai_triage||r.ai_review)?`<div class="ai t-cap"><span class="aic ${(r.removal_reason==="ai_reject"||(r.ai_review&&!r.ai_review.startsWith("통과")))?"no":""} t-micro">AI 판정${r.ai_conf?` ${esc(r.ai_conf)}`:""}</span><span>${esc([r.ai_triage,r.ai_review&&!r.ai_review.startsWith("통과")?"검수: "+r.ai_review:(r.ai_review?"검수 "+r.ai_review:"")].filter(Boolean).join(" · "))}</span></div>`:""}
   ${link?`<div class="match t-cap"><span class="kind t-micro">${esc(linkKind(link))}</span>${ic("link","dim")}<a href="${esc(link)}" target="_blank" rel="noopener" title="${esc(link)}">${esc(linkLabel(link))}</a></div>`:""}
   ${r.draft?`<pre class="draft t-body">${esc(r.draft)}</pre>`:""}
   ${r.status==="skip"?"":`<div class="acts">
@@ -732,7 +732,7 @@ function ask(label,ph){return new Promise(res=>{const d=document.createElement("
 const RM=matchMedia("(prefers-reduced-motion: reduce)").matches;
 const STG=[["search","검색"],["q","질문 판정"],["m","매칭"],["d","초안"],["s","점수"],["c","분류"]];
 const STEP=[["q","질문 판정"],["m","매칭"],["d","초안"],["s","점수"],["r","결과"]];
-const RTONE={not_question:"g",same_cafe_today:"g",no_match:"o",error:"o",low_score:"r",same_draft:"r",ai_reject:"o"};
+const RTONE={not_question:"g",same_cafe_today:"g",no_match:"o",error:"o",low_score:"r",same_draft:"r",ai_reject:"o",stale:"g",deleted:"g",unread:"o",not_member:"g",no_permission:"g",audit_live_question:"r",audit_right_target:"r",audit_not_redundant:"r",audit_fits_board:"r"};
 const RCOL={g:"var(--dim)",o:"var(--warn)",r:"var(--up)"};
 let EV_LAST=0,EV_ALL=[],PQ=[],SPEED=1,PUMPING=false,RUNKEY=null,FIRST=true,HOLD=false,TF="",REV=false;
 let CNT,RC,PASS,DRAFT,URLS,RUN,DONE_T,FOC;
@@ -806,7 +806,8 @@ function apply(ev,anim){
    case "ai_triage":log("AI_TRIAGE","ai",`${ev.ok?"질문·관련·적절 ✓":"제외 판단"}  확신 ${esc(ev.confidence)}  · ${esc(excerpt(ev.reason||"",48))}`,ev,anim);break;
    case "ai_extract":log("AI_EXTRACT","ai",`${esc([...(ev.complexes||[])].join(" · ")||"단지 없음")}${ev.gu||ev.dong?`  @ ${esc([ev.gu,ev.dong].filter(Boolean).join(" "))}`:""}  · ${esc(ev.concern||"")}${ev.purpose?"/"+esc(ev.purpose):""}`,ev,anim);break;
    case "ai_draft":log("AI_DRAFT","ai",ev.ok?`Sonnet 초안 ${fmt(ev.chars)}자`:`Sonnet 초안 실패 → 규칙 초안${ev.error?" ("+esc(ev.error)+")":""}`,ev,anim);break;
-   case "ai_review":log("AI_REVIEW","ai",ev.ok?`통과 (${esc(ev.by||"")} 심사 · ${esc(ev.draft_by||"")} 초안)`:`걸림 (${esc(ev.by||"")}) · ${esc(excerpt((ev.issues||[]).join("; "),48))}`,ev,anim);break;
+   case "read":log("READ","ai",`원문 읽기 ${fmt(ev.total)}건 — 게시판·본문·댓글·댓글 권한`,ev,anim);break;
+   case "ai_review":log("AI_REVIEW","ai",ev.ok?`통과 (${esc(ev.by||"")} 검수 · ${esc(ev.draft_by||"")} 초안)`:`걸림 (${esc(ev.by||"")}) · ${esc(excerpt((ev.issues||[]).join("; "),48))}`,ev,anim);break;
    case "result":{const pass=["needs_human","ready","posted"].includes(ev.status);
      if(pass){CNT.s++;CNT.c++;DRAFT[ev.id]=ev.draft||"";PASS.unshift({id:ev.id,title:FOC&&FOC.id===ev.id?FOC.title:"",channel:FOC&&FOC.channel,draft:ev.draft||""});renderPass();flowDot("c","pass");
        log("PASS","pass",`→ ${esc(ST[ev.status]||ev.status)}  ${ev.score!==""?esc(ev.score)+"점":""}`,ev,anim);

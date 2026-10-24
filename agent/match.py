@@ -136,7 +136,9 @@ def complexes_from_entities(ent: dict, max_calls: int = 6, text: str = "") -> li
             items = []
         in_gu = [i for i in items if _gu_ok(i.get("gu", ""), gu)]
         in_dong = [i for i in in_gu if _dong_ok(i.get("dong", ""), dong)]
-        ex = lambda xs: [i for i in xs if _core(i["name"], base | _regions(i.get("dong"))) == core]
+        # ★양쪽에서 같은 동네 접두를 뗀다 — 리블 '부개주공3'(부개동)은 '주공3'으로, 글의 '부개주공3'은 그대로라 못 맞췄다(10-25)
+        ex = lambda xs: [i for i in xs if _core(i["name"], base | _regions(i.get("dong")))
+                         in (core, _core(name, base | _regions(i.get("dong"))))]
         # ★동 조건으로 0건이면 같은 구 안에서 다시 — '목동' 신시가지는 법정동 목동·신정동에 걸쳐 있다(목동우성2=신정동)
         exact = ex(in_dong) or (ex(in_gu) if gu else [])
         region_ok = False

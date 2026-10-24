@@ -3,12 +3,15 @@
 - triage: 실제 주거 질문인가 / 리블 페이지가 답이 되는가 / 댓글이 적절한가 + 조건 구조화. Haiku.
 - review: 코드가 먼저 숫자·날짜·링크·공개 문구를 대조하고(실패면 Claude를 부르지 않는다), 통과하면 Haiku가 표현을 심사.
 - Claude는 숫자를 만들지 않는다. 숫자는 리블 공개 API에서 코드가 가져온 facts 안에서만.
-- 글 원문은 600자로 자르고 작성자 닉네임은 넣지 않는다.
+- 판정(triage)은 검색 요약, 추출·작성·검수는 원문(reader)을 쓴다. 작성자·댓글 닉네임은 넣지 않는다.
 """
 from __future__ import annotations
 
 import json
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from . import claude
 
@@ -91,6 +94,49 @@ def code_check(draft: str, facts: list[str]) -> list[str]:
     return issues
 
 
+_EMOJI = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF]")
+
+
+def format_check(draft: str, style: str = "polite") -> list[str]:
+    """형식(2026-10-24 사용자 확정) — 두 줄·괄호 없음·이모지 없음. 유튜브(video)는 한 줄."""
+    issues = []
+    lines = [ln for ln in draft.splitlines() if ln.strip()]
+    want = 1 if style == "video" else 2
+    if len(lines) != want:
+        issues.append(f"{want}줄이 아님({len(lines)}줄)")
+    if re.search(r"[()（）]", _URL.sub(" ", draft)):
+        issues.append("괄호가 있음")
+    if _EMOJI.search(draft):
+        issues.append("이모지가 있음")
+    return issues
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+def link_check(link: str, cids: list[str]) -> list[str]:
+    """링크가 답글이 다룬 단지를 여는가 — 단축 링크(/c/키)는 이동 주소의 compare=에 단지 cid가 모두 있는지 본다."""
+    if not link:
+        return ["링크 없음"]
+    if "/c/" not in link:
+        path = urllib.parse.unquote(link)
+        return [] if all(c in path for c in cids) else ["링크가 답글의 단지 페이지가 아님"]
+    try:
+        urllib.request.build_opener(_NoRedirect).open(urllib.request.Request(link, method="GET",
+                                                      headers={"User-Agent": "reevl-gtm-agent/0.1"}), timeout=10)
+        return ["단축 링크가 이동하지 않음"]
+    except urllib.error.HTTPError as e:
+        loc = urllib.parse.unquote(e.headers.get("Location") or "")
+        if e.code not in (301, 302, 307, 308) or not loc:
+            return [f"단축 링크 응답 {e.code}"]
+        miss = [c.split("|")[1] for c in cids if c not in loc]
+        return [f"단축 링크에 없는 단지: {', '.join(miss)}"] if miss else []
+    except Exception as e:
+        return [f"단축 링크 확인 실패: {type(e).__name__}"]
+
+
 def triage(post_title: str, post_text: str, channel: str, where: str, matched: dict) -> tuple[dict, float]:
     user = json.dumps({
         "channel": channel, "community": where,
@@ -130,6 +176,92 @@ def review_two_stage(draft: str, facts: list[str], channel: str, ambiguous: floa
     return r2, c1 + c2
 
 
+# ── 최종 검수(audit) — 원문 전체·기존 댓글·단지 주소를 보고 Opus·Sonnet 두 모델이 따로 판정, 둘 다 통과해야 통과 ──
+# 10-24까지의 review는 검색 요약(약 200자)만 보고 Haiku가 먼저 판정했다. 지식iN 첫 실행에서 통과 5건 중 4건이 엉뚱한 단지였고
+# ('서촌 한옥'→인천 하나아파트, 남양주 덕소→수원 화서주공), 심사가 답글 단지의 실제 주소를 몰라 잡지 못했다.
+AUDIT_CHECKS = ["live_question", "right_target", "answers_ask", "facts_only", "no_advice",
+                "honest_tone", "not_redundant", "fits_board", "link_fit"]
+
+AUDIT_SYSTEM = """너는 부동산 커뮤니티 답글의 최종 검수자다. 통과하면 사람이 문장을 다시 고치지 않고 그대로 올라간다. 확실하지 않으면 떨어뜨린다.
+입력: post(게시판·제목·본문 전체·작성 시각), comments(이미 달린 댓글 본문), draft(올릴 답글), facts(답글 수치의 출처 — 리블 공개 실거래),
+complexes(답글이 다룬 단지의 리블 기준 이름·시군구·동·세대수), link(답글 링크가 여는 페이지 설명).
+
+아홉 항목을 서로 독립적으로 판정해 checks에 ok와 한 줄 근거를 적는다.
+1 live_question: 글쓴이가 지금 주거 판단(매매·전세·실거주·학군·통근·재건축·청약)을 위해 묻는 글인가. 광고·분양 홍보·뉴스 퍼옴·후기·공지·잡담, 글쓴이가 이미 결론을 냈다고 밝힌 글이면 false.
+2 right_target: 답글의 단지 하나하나가 글쓴이가 말한 바로 그 단지인가. complexes의 시군구·동을 글의 지역 단서와 대조한다. 이름이 비슷해도 지역이 다르면 false(예: 남양주 덕소 질문에 수원 화서주공). 글에 지역 단서가 없는데 흔한 이름이면 false. 글쓴이가 단지를 말하지 않았는데 답글이 임의 단지를 골랐으면 false.
+3 answers_ask: 글쓴이의 핵심 질문 가운데 적어도 하나에 사실로 직접 답하는가. 전부 답할 필요는 없다. 비교 질문이면 글쓴이가 비교한 단지를 모두 다뤄야 한다. 답하지 않은 부분(교육·전망 등)을 답한 척하면 false. 글쓴이의 전제(예: 두 단지 가격이 같다)와 facts가 다르면 facts대로 쓴 답은 도움이 되는 정보로 본다. 글쓴이의 고민이 예산·대출·청약 전략처럼 실거래 수치로 답할 수 없는 것이면 false.
+4 facts_only: 답글의 금액·면적·평형·단지명이 facts에 있는 그대로인가. facts에 함께 적힌 반올림 표기(84.8㎡ → 85㎡)는 허용.
+5 no_advice: 매수·매도 권유, 오른다·내린다 단정이나 전망, 학교 배정 확정, 세무·법률·대출 판단이 없는가.
+6 honest_tone: '제가 운영하는'류 관계 공개가 있고, 정보가 먼저이며, 홍보 문구·과장·다른 서비스 비하가 없고, 링크가 하나인가.
+7 not_redundant: 기존 댓글에 같은 수치나 리블 링크가 이미 있지 않은가. 있으면 false.
+8 fits_board: 게시판이 질문·상담에 맞는가. 공지·광고·분양홍보·매물·후기·출석·가입인사 게시판이면 false. 게시판 이름이 비어 있으면 true.
+9 link_fit: link가 답글이 다룬 단지(들)의 페이지인가.
+
+pass는 아홉 항목이 모두 ok일 때만 true. 근거는 한국어로 짧게. confidence는 전체 판정 확신(0~1)."""
+
+AUDIT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "checks": {"type": "object", "properties": {
+            k: {"type": "object", "properties": {"ok": {"type": "boolean"}, "why": {"type": "string"}}, "required": ["ok", "why"]}
+            for k in AUDIT_CHECKS}, "required": AUDIT_CHECKS},
+        "pass": {"type": "boolean"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+    "required": ["checks", "pass", "confidence"],
+}
+
+
+def _audit_one(model: str, payload: str) -> tuple[dict, float]:
+    # ★max_tokens는 넉넉히 — Sonnet 5.5는 생각 토큰을 먼저 쓴다. 1,200으로 두었더니 판정 JSON이 잘려 맞는 답글을 떨어뜨렸다(10-25 평가)
+    usd = 0.0
+    for _ in range(2):
+        out, u = claude.call_tool(model, AUDIT_SYSTEM, payload, "audit", AUDIT_SCHEMA, "검수 결과를 기록한다", max_tokens=4000)
+        usd += u
+        checks = out.get("checks") or {}
+        if isinstance(checks, dict) and all(isinstance(checks.get(k), dict) and "ok" in checks[k] for k in AUDIT_CHECKS):
+            break                                # 아홉 항목이 다 있으면 끝, 빠졌으면 한 번 더 묻는다
+    checks = out.get("checks") or {}
+    if not isinstance(checks, dict):
+        checks = {}
+    failed = [k for k in AUDIT_CHECKS if not (checks.get(k) or {}).get("ok")]
+    return {"pass": bool(out.get("pass")) and not failed, "failed": failed,
+            "why": {k: ((checks.get(k) or {}).get("why") or "검수 응답에 이 항목이 없음")[:160] for k in failed},
+            "confidence": float(out.get("confidence") or 0)}, usd
+
+
+def audit(post: dict, comments: list[str], draft: str, facts: list[str], complexes: list[dict], link: str,
+          channel: str, style: str = "polite") -> tuple[dict, float]:
+    """코드 검사(수치·날짜·공개·형식·링크 대상) → Opus·Sonnet 독립 판정. 둘 다 통과해야 pass.
+    post = {board, title, text, written}. 원문은 3,000자, 댓글은 15개까지. 닉네임은 넣지 않는다."""
+    cids = [c.get("cid", "") for c in complexes if c.get("cid")]
+    issues = code_check(draft, facts) + format_check(draft, style) + link_check(link, cids)
+    if issues:                                   # 코드에서 걸리면 Claude를 부르지 않는다
+        return {"pass": False, "issues": issues, "confidence": 1.0, "by": "code", "failed": ["code"]}, 0.0
+    payload = json.dumps({
+        "channel": channel,
+        "post": {"board": post.get("board", ""), "title": (post.get("title") or "")[:200],
+                 "text": (post.get("text") or "")[:3000], "written": post.get("written", "")},
+        "comments": [c[:200] for c in (comments or [])[:15]],
+        "draft": draft, "facts": facts,
+        "complexes": [{"name": c.get("name"), "sigungu": c.get("gu"), "dong": c.get("dong"), "households": c.get("hh")}
+                      for c in complexes],
+        "link": ("리블 비교 페이지: " if "/c/" in link else "리블 단지 페이지: ") + ", ".join(c.get("name", "") for c in complexes),
+    }, ensure_ascii=False)
+    total, votes = 0.0, {}
+    for name, model in (("opus", claude.OPUS), ("sonnet", claude.SONNET)):
+        v, usd = _audit_one(model, payload)
+        total += usd
+        votes[name] = v
+        if not v["pass"]:                        # 한쪽이 떨어뜨리면 다른 쪽은 부르지 않는다(비용)
+            break
+    ok = len(votes) == 2 and all(v["pass"] for v in votes.values())
+    failed = sorted({k for v in votes.values() for k in v["failed"]})
+    issues = [f"{k}: {v['why'][k]}" for v in votes.values() for k in v["failed"]]
+    return {"pass": ok, "issues": issues, "failed": failed, "votes": votes,
+            "confidence": min(v["confidence"] for v in votes.values()), "by": "+".join(votes)}, total
+
+
 # ── 추출(Sonnet) — 글에서 조건을 구조화해 매칭을 좁힌다 ──────────────────────────
 EXTRACT_SYSTEM = """너는 한국 부동산 커뮤니티 글에서 조건을 뽑는 추출기다. 글에 실제로 나온 것만, 없으면 빈 값.
 - complexes: 아파트 단지명 후보. 줄임말·별칭이면 정식명 추정도 함께(예: '목동 7단지' → '목동신시가지7단지'). 최대 5개.
@@ -156,9 +288,9 @@ EXTRACT_SCHEMA = {
 
 
 def extract(post_title: str, post_text: str) -> tuple[dict, float]:
-    user = json.dumps({"title": (post_title or "")[:200], "text": (post_text or "")[:600]}, ensure_ascii=False)
+    user = json.dumps({"title": (post_title or "")[:200], "text": (post_text or "")[:2000]}, ensure_ascii=False)
     out, usd = claude.call_tool(claude.SONNET, EXTRACT_SYSTEM, user, "extract", EXTRACT_SCHEMA,
-                                "글의 조건을 기록한다", max_tokens=500)
+                                "글의 조건을 기록한다", max_tokens=3000)
     out["complexes"] = [c for c in (out.get("complexes") or []) if isinstance(c, str) and c.strip()][:5]
     return out, usd
 
@@ -179,10 +311,10 @@ DRAFT_SCHEMA = {"type": "object", "properties": {"text": {"type": "string"}}, "r
 
 
 def draft(post: dict, entities: dict, facts: list[str], channel: str, link: str, style: str) -> tuple[dict, float]:
-    user = json.dumps({"post": {"title": (post.get("title") or "")[:200], "text": (post.get("text") or "")[:600]},
+    user = json.dumps({"post": {"title": (post.get("title") or "")[:200], "text": (post.get("text") or "")[:1500]},
                        "entities": entities or {}, "facts": facts, "link": link, "style": style, "channel": channel},
                       ensure_ascii=False)
     out, usd = claude.call_tool(claude.SONNET, DRAFT_SYSTEM, user, "answer", DRAFT_SCHEMA,
-                                "답글 전문을 기록한다", max_tokens=500)
+                                "답글 전문을 기록한다", max_tokens=3000)
     out["text"] = (out.get("text") or "").strip()
     return out, usd

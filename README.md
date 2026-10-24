@@ -30,7 +30,7 @@
 1. **Discover:** 네이버 카페·지식iN·유튜브·국내 부동산 커뮤니티에서 실제 주거 질문 탐지. 공식 API만 사용(`agent/discover.py`)
 2. **Match:** 질문에 등장하는 단지·학교·역·지역을 리블 데이터와 자동 매칭(`agent/match.py`, `agent/hubs.py`)
 3. **Answer:** 검증된 실거래 데이터로 답하는 2~3줄 요약과 맞춤 비교·분석 딥링크 생성(`agent/intent.py`, `agent/reply.py`)
-4. **Review:** Claude Haiku로 질문·적절성 판정, Sonnet으로 단지·지역·평형 추출과 답변 작성, Haiku 심사(애매하면 Opus 재심)와 숫자 코드 대조. 게시 정책에 맞춰 검수·발행하고 리블과의 관계 공개([설계·예산](docs/06-claude-plan.md))
+4. **Review:** Claude Haiku로 질문·적절성 판정, Sonnet으로 단지·지역·평형 추출과 답변 작성, 원문·기존 댓글을 읽은 뒤 코드 대조(수치·날짜·공개·형식·링크 대상)와 Opus·Sonnet 독립 검수(9개 항목, 둘 다 통과해야 통과, [평가](docs/07-loop-log.md)). 게시 정책에 맞춰 검수·발행하고 리블과의 관계 공개([설계·예산](docs/06-claude-plan.md))
 5. **Measure & Improve:** GA4로 유입·참여·재방문을 추적하고 매일 성과에 따라 다음 질문 선정과 답변 방식 개선(`analysis/ga_report.py`, [실험 로그](docs/07-loop-log.md))
 
 **차별점:** 기존 GTM Agent가 잠재고객에게 메시지를 보내는 방식이라면, 리블은 이미 존재하는 부동산 질문을 실제 데이터와 연결해 '공유 가능한 답변'으로 바꿉니다.
@@ -131,7 +131,7 @@ flowchart LR
 
 ## 안전장치
 
-- **관계 공개**: 모든 댓글 끝에 짧은 공개 문구("제가 만든 서비스라 참고만 하세요")를 붙인다. 표시광고법 추천·보증 심사지침상 운영자의 자기 서비스 소개는 이해관계 공개 대상이다. 공개 없이 일반 사용자처럼 쓰는 기능은 만들지 않는다.
+- **관계 공개**: 모든 댓글 둘째 줄 문장 안에 관계를 밝힌다("제가 운영하는 리블에 … 정리해 뒀어요"). 표시광고법 추천·보증 심사지침상 운영자의 자기 서비스 소개는 이해관계 공개 대상이다. 공개 없이 일반 사용자처럼 쓰는 기능은 만들지 않는다.
 - **자동 게시 중지(기본)**: `GTM_AUTOPUBLISH=1`을 켜기 전에는 `--publish`를 줘도 실제로 등록하지 않고 사람 대기열로 보낸다.
 - **규칙 allowlist**: `data/rules.json`에 카페별 규칙 확인(허용 여부·공지 URL·확인일)이 없으면 자동 게시는 0건이다. 형식은 [examples/rules.example.json](examples/rules.example.json).
 - **하루 최대 3건**: 게시량은 성과가 아니다. 허용 질문이 없으면 0건이 정상이다.
@@ -208,6 +208,6 @@ https://reevl.co.kr/c/ZaFYk94S (제가 만든 서비스라 참고만 하세요)
 
 - 데이터: [리블](https://reevl.co.kr) 공개 MCP API(국토교통부 실거래가 등 공공데이터 기반)
 - 검색: NAVER API HUB 검색(카페글·지식iN·블로그), 카카오 다음 검색 API(카페·웹 `site:` 커뮤니티), YouTube Data API v3, 뽐뿌 RSS
-- 판정·추출·작성·심사: Claude Haiku 5.5 · Sonnet 5.5 · Opus 5.5 재심 (Messages API, 하루 $8 · 총 $98 상한, 크레딧 11/7 만료)
+- 판정·추출·작성·검수: Claude Haiku 5.5(판정) · Sonnet 5.5(추출·작성·검수) · Opus 5.5(검수) (Messages API, 하루 $8 · 총 $98 상한, 크레딧 11/7 만료)
 - 게시: Aside 브라우저 CLI
 - 행사: Clone Loop Day in Seoul (Clone, OpenAI, NAVER D2SF, Deepest)

@@ -148,7 +148,7 @@ def build(text: str, channel: str = "copy", placement: str | None = None, qa: bo
             return {"ok": False, "why": "비교할 실거래가 부족합니다", "complexes": cs, "hubs": hs, "fit": 0, "data": 0}
         lines.append(f"{head} {', '.join(parts)}이에요.")
         link = shortlink.compare(cids) or tracked(compare_path(cids), channel, "compare", placement, qa)
-        tail = "두 단지 평형별 실거래 비교"
+        tail = f"{'두' if len(cids) == 2 else '세'} 단지 평형별 실거래 비교"   # 세 단지 비교에 '두 단지'라 썼다(10-25)
         fit, data = 3, 3
     elif len(cs) == 1:
         c = cs[0]

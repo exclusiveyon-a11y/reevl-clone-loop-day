@@ -18,7 +18,7 @@ from datetime import datetime
 
 import re
 
-from . import claude, config, discover, intent, judge, poster, queue, reply
+from . import claude, config, discover, intent, judge, poster, queue, reader, reply
 from .queue import KST
 
 # 질문 신호 — 묻는 글에만 답한다. 광고 신호 — 중개 매물·분양 홍보 글은 건너뛴다.
@@ -81,6 +81,16 @@ def _search(queries: list[str], providers: list[str] | None) -> list[dict]:
     return out
 
 
+def _age(posted: str) -> int | None:
+    """작성일('2026-10-22…')이 오늘로부터 며칠 전인가. 모르면 None."""
+    if not posted:
+        return None
+    try:
+        return (datetime.now(KST).date() - datetime.fromisoformat(posted[:10]).date()).days
+    except ValueError:
+        return None
+
+
 def _today_posts(rows: list[dict]) -> list[dict]:
     today = datetime.now(KST).strftime("%Y-%m-%d")
     return [r for r in rows if r.get("status") == "posted" and (r.get("posted_at") or "").startswith(today)]
@@ -107,67 +117,121 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
         return r
     summary = {"found": len(found), "matched": 0, "ready": 0, "posted": 0, "needs_human": 0, "skip": 0, "dup": 0}
     _progress(running=True, total=len(found), processed=0, summary=summary, queries=queries)
+    seen = {r["source_url"] for r in queue.load()}
+
+    def _skip(base_: dict, reason: str, why: str = "", **kv) -> None:
+        _append({**base_, **kv, "status": "skip", "removal_reason": reason, "why": why})
+        summary["skip"] += 1
+
+    # ── 1차: 값싼 거름(중복·질문·광고·작성일) + Claude 판정(Haiku, 검색 요약) ──
+    keep: list[dict] = []
     for i, it in enumerate(found):
         if i % 5 == 0:
             _progress(running=True, total=len(found), processed=i, summary=summary, queries=queries,
                       current=it.get('title', '')[:60], provider=it.get('provider', ''))
-        rows = queue.load()
         url = it.get("url", "")
-        if not url or any(r["source_url"] == url for r in rows):
+        if not url or url in seen:
             summary["dup"] += 1
             continue
+        seen.add(url)
         cur['id'] = hashlib.sha1(url.encode()).hexdigest()[:10]
         _emit('found', cur['id'], provider=it.get('provider', ''), channel=it.get('channel', ''), where=it.get('where', ''),
               title=it.get('title', '')[:80], query=it.get('query', ''), url=url, i=i + 1, total=len(found))
         channel = it.get("channel") or "naver_cafe"
         where = it.get("where", "")
-        placement = f"{channel}-{datetime.now(KST):%m%d}-{len(rows) + 1}"
         base = {"channel": channel, "source_url": url, "title": it.get("title", ""), "where": where,
-                "query": it.get("query", ""), "provider": it.get("provider", ""), "placement_id": placement,
-                "intent": "compare"}
+                "query": it.get("query", ""), "provider": it.get("provider", ""), "intent": "compare"}
         text = f"{it.get('title', '')}\n{it.get('desc', '')}"
         # ★질문 글만 답한다. 다음 카페 실측(10-24): 중개 매물 광고 글이 단지 이름으로 걸려 사람 대기열을 채웠다.
         if not QUESTION.search(text) or AD.search(text):
-            _append({**base, "status": "skip", "removal_reason": "not_question"})
-            summary["skip"] += 1
+            _skip(base, "not_question")
             continue
         # 오래된 질문은 답하지 않는다(이미 결론 난 글에 링크만 남는다). 지식iN은 날짜를 페이지에서 읽는다.
         posted = it.get("posted_at") or (discover.kin_date(url) if channel == "naver_kin" else "")
-        if posted:
-            try:
-                age = (datetime.now(KST).date() - datetime.fromisoformat(posted[:10]).date()).days
-            except ValueError:
-                age = 0
-            if age > STALE_DAYS:
-                _append({**base, "status": "skip", "removal_reason": "stale", "why": f"작성 {posted[:10]} — {age}일 지난 질문"})
-                summary["skip"] += 1
-                continue
-        _emit('question', cur['id'], ok=True)
-        # 같은 카페는 한 번 실행에 한 글만 사람에게 넘긴다(도배 방지 — 게시 상한과 별개).
-        # 지식iN은 where가 사이트 전체('지식iN')라 이 규칙을 걸면 하루 한 질문만 남는다 — 하루 게시 상한으로만 막는다.
-        if where and channel != "naver_kin" and any(r.get("where") == where and r.get("status") in ("ready", "needs_human")
-                         and r.get("found_at", "")[:10] == datetime.now(KST).strftime("%Y-%m-%d") for r in rows):
-            _append({**base, "status": "skip", "removal_reason": "same_cafe_today"})
-            summary["skip"] += 1
+        age = _age(posted)
+        if age is not None and age > STALE_DAYS:
+            _skip(base, "stale", f"작성 {posted[:10]} — {age}일 지난 질문")
             continue
-        # ── Claude 1·2단계(키·예산이 있을 때만): triage(Haiku) → extract(Sonnet). 실패하면 규칙 흐름 ──
-        ai_used, ai_ok, ai_note, conf, ents, spent_ = False, False, "", 0.0, None, 0.0
-        ai_fields: dict = {}
+        _emit('question', cur['id'], ok=True)
+        st = {"it": it, "id": cur['id'], "channel": channel, "where": where, "base": base, "text": text,
+              "conf": 0.0, "ai_used": False, "ai_note": "", "ai_fields": {}, "spent": 0.0}
         if claude.available():
             try:
                 tri, c1 = judge.triage(it.get("title", ""), it.get("desc", ""), channel, where, {})
-                spent_ += c1
+                st["spent"] += c1
                 tri_ok = bool(tri.get("is_question") and tri.get("appropriate"))   # 관련성은 추출·매칭 뒤에 판정(매칭 전 triage가 목동 글을 버렸다)
-                conf = float(tri.get("confidence") or 0)
-                _emit('ai_triage', cur['id'], ok=tri_ok, confidence=round(conf, 2), reason=tri.get("reason", ""))
-                ai_fields = {"ai_triage": tri.get("reason", "")[:200], "ai_conf": round(conf, 2), "ai_cost": round(spent_, 6)}
-                ai_used = True
+                st["conf"] = float(tri.get("confidence") or 0)
+                _emit('ai_triage', cur['id'], ok=tri_ok, confidence=round(st["conf"], 2), reason=tri.get("reason", ""))
+                st["ai_fields"] = {"ai_triage": tri.get("reason", "")[:200], "ai_conf": round(st["conf"], 2),
+                                   "ai_cost": round(st["spent"], 6)}
+                st["ai_used"] = True
                 if not tri_ok:
-                    _append({**base, **ai_fields, "status": "skip", "removal_reason": "ai_reject", "why": tri.get("reason", "")[:120]})
-                    summary["skip"] += 1
+                    _skip(base, "ai_reject", tri.get("reason", "")[:120], **st["ai_fields"])
                     summary["ai_reject"] = summary.get("ai_reject", 0) + 1
                     continue
-                ents, c2 = judge.extract(it.get("title", ""), it.get("desc", ""))
+            except claude.BudgetExceeded as e:
+                st["ai_note"] = f"AI 건너뜀: {e}"
+            except Exception as e:
+                st["ai_note"] = f"AI 건너뜀: {type(e).__name__}: {str(e)[:60]}"
+        keep.append(st)
+
+    # ── 원문 읽기: 판정을 통과한 카페·블로그 글만. 카페는 Aside 탭 하나로 묶어 읽는다(게시판·본문·댓글·댓글 권한) ──
+    _emit('read', None, total=len(keep))
+    try:
+        arts = reader.read_many([(s_["channel"], s_["it"]["url"]) for s_ in keep
+                                 if s_["channel"] in ("naver_cafe", "naver_blog")]) if keep else {}
+    except Exception as e:
+        arts = {}
+        _emit('read_error', None, error=f"{type(e).__name__}: {str(e)[:80]}")
+
+    # ── 2차: 원문으로 거름(삭제·권한·작성일) → 추출(Sonnet) → 매칭·초안 → 최종 검수(코드 + Opus·Sonnet) ──
+    for st in keep:
+        it, base, channel, where = st["it"], st["base"], st["channel"], st["where"]
+        url, ai_fields, conf, ai_used, ai_note, spent_ = it["url"], st["ai_fields"], st["conf"], st["ai_used"], st["ai_note"], st["spent"]
+        cur['id'] = st["id"]
+        rows = queue.load()
+        art = arts.get(url) or {}
+        if art.get("deleted"):
+            _skip(base, "deleted", "삭제되었거나 없는 글", **ai_fields)
+            continue
+        if channel == "naver_cafe" and "레벨" in str(art.get("reason", "")):
+            _skip(base, "no_permission", "카페 등급 부족 — " + str(art.get("reason", ""))[:60], **ai_fields)
+            summary["no_permission"] = summary.get("no_permission", 0) + 1
+            continue
+        if channel == "naver_cafe" and "멤버" in str(art.get("reason", "")):
+            # 미가입 카페 — 읽기·댓글 모두 막힌다. 어느 카페에 가입하면 후보가 늘지 세기 위해 따로 센다.
+            _skip(base, "not_member", "미가입 카페(멤버 공개 글)", **ai_fields)
+            nm = summary.setdefault("not_member", {})
+            nm[where] = nm.get(where, 0) + 1
+            continue
+        if channel in ("naver_cafe", "naver_blog") and not art.get("ok"):
+            # ★원문을 못 읽은 글은 검수할 수 없다 — 요약만 보고 통과시키지 않는다
+            _skip(base, "unread", "원문 읽기 실패: " + str(art.get("reason", ""))[:80], **ai_fields)
+            continue
+        if channel == "naver_cafe" and not art.get("can_comment"):
+            _skip(base, "no_permission", "댓글 권한 없음 — 미가입·등급 제한 " + str(art.get("no_comment_why", ""))[:60], **ai_fields)
+            summary["no_permission"] = summary.get("no_permission", 0) + 1
+            continue
+        age = _age(art.get("written", ""))
+        if age is not None and age > STALE_DAYS:
+            _skip(base, "stale", f"작성 {art['written'][:10]} — {age}일 지난 질문", **ai_fields)
+            continue
+        # 같은 카페는 한 번 실행에 한 글만 넘긴다(도배 방지 — 게시 상한과 별개).
+        # 지식iN은 where가 사이트 전체('지식iN')라 이 규칙을 걸면 하루 한 질문만 남는다 — 하루 게시 상한으로만 막는다.
+        if where and channel != "naver_kin" and any(r.get("where") == where and r.get("status") in ("ready", "needs_human")
+                         and r.get("found_at", "")[:10] == datetime.now(KST).strftime("%Y-%m-%d") for r in rows):
+            _skip(base, "same_cafe_today", **ai_fields)
+            continue
+        title = art.get("subject") or it.get("title", "")
+        body = art.get("text") or it.get("desc", "")
+        text = f"{title}\n{body}"
+        post = {"board": art.get("board", ""), "title": title, "text": body, "written": art.get("written", "")}
+        placement = f"{channel}-{datetime.now(KST):%m%d}-{len(rows) + 1}"
+        base["placement_id"] = placement
+        ents = None
+        if ai_used:
+            try:
+                ents, c2 = judge.extract(title, body)
                 spent_ += c2
                 ai_fields["ai_cost"] = round(spent_, 6)
                 _emit('ai_extract', cur['id'], complexes=(ents.get("complexes") or [])[:3], gu=ents.get("gu", ""),
@@ -179,12 +243,10 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
         try:
             res = reply.build(text, channel, placement, qa, entities=ents)
         except Exception as e:                 # 한 건의 API 지연이 실행 전체를 끊지 않게
-            _append({**base, **ai_fields, "status": "skip", "removal_reason": "error", "why": f"{type(e).__name__}: {str(e)[:80]}"})
-            summary["skip"] += 1
+            _skip(base, "error", f"{type(e).__name__}: {str(e)[:80]}", **ai_fields)
             continue
         if not res.get("ok"):
-            _append({**base, **ai_fields, "status": "skip", "removal_reason": "no_match", "why": res.get("why", "")})
-            summary["skip"] += 1
+            _skip(base, "no_match", res.get("why", ""), **ai_fields)
             continue
         summary["matched"] += 1
         _emit('match', cur['id'], ok=True, kind=res.get('kind', ''), intents=res.get('intents', []), via=res.get('match_via', ''),
@@ -204,7 +266,8 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
             continue
         low = (not allowed) and (s - rs < 6)     # 내용 점수 미달은 AI를 더 부르지 않는다(비용 절약)
         final_text = res["text"]
-        # ── Claude 3·4단계: draft(Sonnet, facts 숫자만) → review(Haiku, 애매하면 Opus 재심). 규칙 초안은 폴백 ──
+        ai_ok = False
+        # ── Claude 3·4단계: draft(Sonnet, facts 숫자만) → audit(코드 + Opus·Sonnet 독립 판정, 원문·댓글·단지 주소). 규칙 초안은 폴백 ──
         if ai_used and not low:
             if conf < 0.6:
                 r_ = _append({**row, "status": "needs_human", "why": "AI 확신 낮음 — " + row.get("ai_triage", "")[:80]})
@@ -214,7 +277,7 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
             try:
                 cands = []
                 try:
-                    dr, c3 = judge.draft({"title": it.get("title", ""), "text": it.get("desc", "")}, ents or {},
+                    dr, c3 = judge.draft({"title": title, "text": body}, ents or {},
                                          res.get("facts", []), channel, res["links"][0], intent.style(channel))
                     spent_ += c3
                     _emit('ai_draft', cur['id'], ok=bool(dr.get("text")), chars=len(dr.get("text", "")))
@@ -227,25 +290,35 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
                 cands.append(("rule", res["text"]))
                 passed, last = None, None
                 for src, txt in cands:
-                    rev, c4 = judge.review_two_stage(txt, res.get("facts", []), channel, question=text)
+                    rev, c4 = judge.audit(post, art.get("comments") or [], txt, res.get("facts", []),
+                                          res.get("complexes", []), res["links"][0], channel, intent.style(channel))
                     spent_ += c4
                     _emit('ai_review', cur['id'], ok=bool(rev.get("pass")), issues=rev.get("issues", [])[:4],
-                          by=rev.get("by", ""), draft_by=src)
+                          by=rev.get("by", ""), draft_by=src, failed=rev.get("failed", []))
                     last = rev
                     if rev.get("pass"):
                         passed = (src, txt)
                         break
+                    if rev.get("by") != "code" and set(rev.get("failed", [])) - {"facts_only", "honest_tone"}:
+                        break                  # 글·단지·게시판 문제는 초안을 바꿔도 같다 — 다음 초안은 심사하지 않는다
                 row["ai_cost"] = round(spent_, 6)
                 if not passed:
-                    row["ai_review"] = "; ".join((last or {}).get("issues", []))[:200]
-                    r_ = _append({**row, "status": "needs_human", "why": "심사 걸림 — " + row["ai_review"][:100]})
+                    row["ai_review"] = "; ".join((last or {}).get("issues", []))[:300]
+                    hard = set((last or {}).get("failed", [])) & {"live_question", "right_target", "not_redundant", "fits_board"}
+                    if hard:                   # 사람이 봐도 올리지 않을 글 — 사람 대기열에 넣지 않는다
+                        _append({**row, "status": "skip", "removal_reason": "audit_" + sorted(hard)[0],
+                                 "why": "검수 탈락 — " + row["ai_review"][:120]})
+                        summary["skip"] += 1
+                        summary["audit_reject"] = summary.get("audit_reject", 0) + 1
+                        continue
+                    r_ = _append({**row, "status": "needs_human", "why": "검수 걸림 — " + row["ai_review"][:120]})
                     summary["needs_human"] += 1
                     new_human.append(r_)
                     continue
                 final_text = passed[1]
                 row.update(draft=final_text, draft_hash=hashlib.sha1(final_text.encode()).hexdigest()[:12],
-                           ai_review=f"통과({passed[0]} 초안 · {last.get('by', '')} 심사)")
-                ai_ok = conf >= 0.75
+                           ai_review=f"통과({passed[0]} 초안 · {last.get('by', '')} 검수 · 확신 {last.get('confidence', 0):.2f})")
+                ai_ok = last.get("confidence", 0) >= 0.7     # 두 모델 중 낮은 쪽 확신
             except claude.BudgetExceeded as e:
                 ai_used, ai_note = False, f"AI 건너뜀: {e}"
             except Exception as e:
@@ -253,7 +326,7 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
         note = f" · {ai_note}" if ai_note else ""
         posted_today = _today_posts(rows)
         cap_ok = len(posted_today) < daily_cap and not any(r.get("where") == where for r in posted_today)
-        if allowed and publish and cap_ok and (ai_ok or not ai_used):
+        if allowed and publish and cap_ok and ai_ok:
             out = poster.post(channel, url, final_text, dry=False)
             if out.get("ok") and out.get("mode") == "posted":
                 _append({**row, "status": "posted", "posted_url": out.get("url", url),
@@ -265,23 +338,19 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
                 if notify_human:
                     notify(r_)
                 new_human.append(r_)
-        elif allowed and not publish and (ai_ok or not ai_used):
-            _append({**row, "status": "ready", "why": ("AI 승인 · " if ai_ok else "") + "publish 꺼짐 — 초안까지" + note})
-            summary["ready"] += 1
         elif low:
             # ★내용 점수(적합도+데이터+최신성, 만점 8)가 6 미만이면 사람에게도 넘기지 않는다.
             #   다음 카페 실측(10-24): 무관한 글이 허브 이름 하나로 걸려 사람 대기열 42건이 쌓였다.
             _append({**row, "status": "skip", "removal_reason": "low_score", "why": f"내용 점수 {s - rs} < 6"})
             summary["skip"] += 1
         elif ai_ok:
-            # AI 판정·추출·작성·심사 통과 — 사람 확인 불필요. 게시는 규칙 허용 채널의 자동 게시 또는 사람이 복사·게시.
-            rule_txt = "규칙 미확인 채널 — 게시는 사람이" if rs < 2 else ("오늘 상한 도달" if not cap_ok else "자동 게시 꺼짐")
-            _append({**row, "status": "ready", "why": f"AI 승인(확신 {row.get('ai_conf')}) · {rule_txt}"})
+            # 원문·댓글을 본 최종 검수(Opus·Sonnet)까지 통과 — 문장은 고칠 필요 없음. 게시는 운영자 확인 뒤.
+            rule_txt = "규칙 미확인 채널" if rs < 2 else ("오늘 상한 도달" if not cap_ok else "자동 게시 꺼짐")
+            _append({**row, "status": "ready", "why": f"검수 통과(확신 {last.get('confidence', 0):.2f}) · {rule_txt}"})
             summary["ready"] += 1
         else:
-            why = ("AI 확신 0.6~0.75 — 사람 확인" if ai_used else
-                   "규칙 미확인 채널 — 사람이 규칙 확인 후 게시" if rs < 2 else
-                   "오늘 상한 도달" if not cap_ok else f"점수 {s} < 8")
+            why = ("검수 확신 0.7 미만 — 사람 확인" if ai_used else
+                   "AI 없이 만든 초안 — 사람 확인")
             r_ = _append({**row, "status": "needs_human", "why": why + note})
             summary["needs_human"] += 1
             if notify_human and publish:
