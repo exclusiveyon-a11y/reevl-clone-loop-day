@@ -92,7 +92,17 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
         print("  (자동 게시 중지 상태 — GTM_AUTOPUBLISH=1일 때만 게시. 이번 실행은 초안까지)")
         publish = False
     rules = load_rules(rules_path)
+    _events_reset()
+    _emit('run_start', None, queries=queries, providers=providers or [])
     found = _search(queries, providers)
+    _emit('searched', None, total=len(found))
+    cur = {'id': ''}
+
+    def _append(row: dict) -> dict:
+        r = queue.append(row)
+        _emit('result', cur['id'], status=row.get('status'), reason=row.get('removal_reason', ''),
+              why=row.get('why', ''), score=row.get('score', ''), draft=row.get('draft', ''), link=row.get('link', ''))
+        return r
     summary = {"found": len(found), "matched": 0, "ready": 0, "posted": 0, "needs_human": 0, "skip": 0, "dup": 0}
     _progress(running=True, total=len(found), processed=0, summary=summary, queries=queries)
     for i, it in enumerate(found):
@@ -104,6 +114,9 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
         if not url or any(r["source_url"] == url for r in rows):
             summary["dup"] += 1
             continue
+        cur['id'] = hashlib.sha1(url.encode()).hexdigest()[:10]
+        _emit('found', cur['id'], provider=it.get('provider', ''), channel=it.get('channel', ''), where=it.get('where', ''),
+              title=it.get('title', '')[:80], query=it.get('query', ''), url=url, i=i + 1, total=len(found))
         channel = it.get("channel") or "naver_cafe"
         where = it.get("where", "")
         placement = f"{channel}-{datetime.now(KST):%m%d}-{len(rows) + 1}"
@@ -113,36 +126,40 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
         text = f"{it.get('title', '')}\n{it.get('desc', '')}"
         # ★질문 글만 답한다. 다음 카페 실측(10-24): 중개 매물 광고 글이 단지 이름으로 걸려 사람 대기열을 채웠다.
         if not QUESTION.search(text) or AD.search(text):
-            queue.append({**base, "status": "skip", "removal_reason": "not_question"})
+            _append({**base, "status": "skip", "removal_reason": "not_question"})
             summary["skip"] += 1
             continue
+        _emit('question', cur['id'], ok=True)
         # 같은 카페는 한 번 실행에 한 글만 사람에게 넘긴다(도배 방지 — 게시 상한과 별개).
         if where and any(r.get("where") == where and r.get("status") in ("ready", "needs_human")
                          and r.get("found_at", "")[:10] == datetime.now(KST).strftime("%Y-%m-%d") for r in rows):
-            queue.append({**base, "status": "skip", "removal_reason": "same_cafe_today"})
+            _append({**base, "status": "skip", "removal_reason": "same_cafe_today"})
             summary["skip"] += 1
             continue
         try:
             res = reply.build(text, channel, placement, qa)
         except Exception as e:                 # 한 건의 API 지연이 실행 전체를 끊지 않게
-            queue.append({**base, "status": "skip", "removal_reason": "error", "why": f"{type(e).__name__}: {str(e)[:80]}"})
+            _append({**base, "status": "skip", "removal_reason": "error", "why": f"{type(e).__name__}: {str(e)[:80]}"})
             summary["skip"] += 1
             continue
         if not res.get("ok"):
-            queue.append({**base, "status": "skip", "removal_reason": "no_match", "why": res.get("why", "")})
+            _append({**base, "status": "skip", "removal_reason": "no_match", "why": res.get("why", "")})
             summary["skip"] += 1
             continue
         summary["matched"] += 1
+        _emit('match', cur['id'], ok=True, kind=res.get('kind', ''), intents=res.get('intents', []),
+              complexes=[c.get('name') for c in res.get('complexes', [])][:3], hubs=[h.get('name') for h in res.get('hubs', [])][:2])
         rs, rule_url = rule_score(rules, channel, where)
         fr = fresh_score(it.get("rank"))
         s, allowed = queue.score(res["fit"], res["data"], fr, rs)
         h = hashlib.sha1(res["text"].encode()).hexdigest()[:12]
+        _emit('score', cur['id'], fit=res['fit'], data=res['data'], fresh=fr, rule=rs, total=s)
         row = {**base, "score": s, "allowed": allowed, "rule_url": rule_url,
                "fit": res["fit"], "data": res["data"], "fresh": fr, "rule": rs,
                "rule_checked_at": (rules.get(channel) or {}).get(where, {}).get("checked_at", "") if rs else "",
                "draft": res["text"], "link": res["links"][0], "draft_hash": h}
         if any(r.get("draft_hash") == h for r in rows):
-            queue.append({**row, "status": "skip", "removal_reason": "same_draft"})
+            _append({**row, "status": "skip", "removal_reason": "same_draft"})
             summary["skip"] += 1
             continue
         posted_today = _today_posts(rows)
@@ -150,35 +167,61 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
         if allowed and publish and cap_ok:
             out = poster.post(channel, url, res["text"], dry=False)
             if out.get("ok") and out.get("mode") == "posted":
-                queue.append({**row, "status": "posted", "posted_url": out.get("url", url),
+                _append({**row, "status": "posted", "posted_url": out.get("url", url),
                               "posted_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M")})
                 summary["posted"] += 1
             else:
-                r_ = queue.append({**row, "status": "needs_human", "why": out.get("why", "게시 실패")})
+                r_ = _append({**row, "status": "needs_human", "why": out.get("why", "게시 실패")})
                 summary["needs_human"] += 1
                 if notify_human:
                     notify(r_)
         elif allowed and not publish:
-            queue.append({**row, "status": "ready", "why": "publish 꺼짐 — 초안까지"})
+            _append({**row, "status": "ready", "why": "publish 꺼짐 — 초안까지"})
             summary["ready"] += 1
         elif s - rs < 6:
             # ★내용 점수(적합도+데이터+최신성, 만점 8)가 6 미만이면 사람에게도 넘기지 않는다.
             #   다음 카페 실측(10-24): 무관한 글이 허브 이름 하나로 걸려 사람 대기열 42건이 쌓였다.
-            queue.append({**row, "status": "skip", "removal_reason": "low_score", "why": f"내용 점수 {s - rs} < 6"})
+            _append({**row, "status": "skip", "removal_reason": "low_score", "why": f"내용 점수 {s - rs} < 6"})
             summary["skip"] += 1
         else:
             why = ("규칙 미확인 채널 — 사람이 규칙 확인 후 게시" if rs < 2 else
                    "오늘 상한 도달" if not cap_ok else f"점수 {s} < 8")
-            r_ = queue.append({**row, "status": "needs_human", "why": why})
+            r_ = _append({**row, "status": "needs_human", "why": why})
             summary["needs_human"] += 1
             if notify_human and publish:
                 notify(r_)
             new_human.append(r_)
     summary["human_new"] = len(new_human)
     _progress(running=False, total=len(found), processed=len(found), summary=summary, queries=queries)
+    _emit('run_end', None, summary=summary)
     if notify_summary and new_human:
         digest(new_human, summary)
     return summary
+
+
+EVENTS = os.environ.get("GTM_EVENTS", "data/events.jsonl")
+_SEQ = {"n": 0}
+
+
+def _events_reset() -> None:
+    """실행마다 이벤트 파일을 새로 시작한다 — 관리자 화면이 seq로 이어 읽는다."""
+    _SEQ["n"] = 0
+    try:
+        os.makedirs(os.path.dirname(EVENTS) or ".", exist_ok=True)
+        open(EVENTS, "w", encoding="utf-8").close()
+    except Exception:
+        pass
+
+
+def _emit(stage: str, item_id: str | None, **kv) -> None:
+    """라이브 이벤트 한 줄(JSONL). 질문 원문·닉네임은 담지 않는다(제목·채널·카페명·판단 결과만)."""
+    _SEQ["n"] += 1
+    ev = {"seq": _SEQ["n"], "t": datetime.now(KST).strftime("%H:%M:%S"), "stage": stage, "id": item_id or "", **kv}
+    try:
+        with open(EVENTS, "a", encoding="utf-8") as f:
+            f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 PROGRESS = os.environ.get("GTM_PROGRESS", "data/run_status.json")

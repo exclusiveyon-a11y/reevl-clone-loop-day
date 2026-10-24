@@ -259,7 +259,7 @@ YT_QUESTION = re.compile(r"\?|？|고민|어디|추천|괜찮|궁금|vs|VS|비�
 
 def _yt_get(endpoint: str, params: dict, cost: int) -> dict:
     """할당량을 먼저 세고 부른다. 403은 이유(API 미사용·키 제한·할당량 초과)를 그대로 올린다."""
-    key = config.get("GOOGLE_API_KEY")
+    key = (config.get("YOUTUBE_API_KEY") or config.get("GOOGLE_API_KEY"))
     if not key:
         raise RuntimeError("GOOGLE_API_KEY 없음 — 리블 .env 또는 환경 변수에 둘 것")
     _budget(_YT_UNITS, YT_DAILY_UNITS, cost, "유튜브 할당량(단위)")
@@ -358,7 +358,7 @@ def available() -> list[str]:
         out += ["naver_cafe", "naver_kin", "naver_blog"]
     if config.get("KAKAO_REST_API_KEY"):
         out += ["daum_cafe", "daum_web", "community"]
-    if config.get("GOOGLE_API_KEY"):
+    if (config.get("YOUTUBE_API_KEY") or config.get("GOOGLE_API_KEY")):
         out += ["youtube"]
     return out + ["ppomppu"]
 
