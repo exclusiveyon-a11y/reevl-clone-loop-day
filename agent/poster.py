@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -53,6 +54,10 @@ else {{
 
 
 def post(channel: str, url: str, text: str, dry: bool = True, timeout: int = 180) -> dict:
+    # ★자동 게시 중지(2026-10-24 사용자 지시 "자동 게시는 중지시켜두고 탐색, 맞춤 댓글까지").
+    #   GTM_AUTOPUBLISH=1이 아니면 실제 등록은 하지 않는다 — --publish를 줘도 사람 대기열로 간다.
+    if not dry and os.environ.get("GTM_AUTOPUBLISH") != "1":
+        return {"ok": False, "why": "자동 게시 중지됨(GTM_AUTOPUBLISH≠1) — 사람 게시", "human": True}
     if channel != "naver_cafe":
         return {"ok": False, "why": f"{channel} 자동 게시는 v0 미지원 — 사람 게시", "human": True}
     try:

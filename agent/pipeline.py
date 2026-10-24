@@ -54,7 +54,8 @@ def fresh_score(rank) -> int:
 
 def notify(row: dict) -> None:
     """사람 대기열 알림 — 텔레그램 키가 있으면 보내고, 없으면 콘솔. 토큰은 출력하지 않는다."""
-    msg = f"[리블 GTM 사람 게시 필요] {row.get('channel')} · {row.get('where')}\n{row.get('source_url')}\n사유: {row.get('why') or row.get('status')}\n\n{row.get('draft')}"
+    msg = row.get("_text") or (f"[리블 GTM 사람 게시 필요] {row.get('channel')} · {row.get('where')}\n{row.get('source_url')}\n"
+                               f"사유: {row.get('why') or row.get('status')}\n\n{row.get('draft')}")
     tok, chat = config.get("TELEGRAM_BOT_TOKEN"), config.get("TELEGRAM_CHAT_ID")
     if tok and chat:
         try:
@@ -84,11 +85,20 @@ def _today_posts(rows: list[dict]) -> list[dict]:
 
 
 def run(queries: list[str], providers: list[str] | None = None, publish: bool = False, daily_cap: int = 3,
-        rules_path: str = "data/rules.json", qa: bool = False, notify_human: bool = True) -> dict:
+        rules_path: str = "data/rules.json", qa: bool = False, notify_human: bool = True,
+        notify_summary: bool = False) -> dict:
+    new_human: list[dict] = []
+    if publish and os.environ.get("GTM_AUTOPUBLISH") != "1":
+        print("  (자동 게시 중지 상태 — GTM_AUTOPUBLISH=1일 때만 게시. 이번 실행은 초안까지)")
+        publish = False
     rules = load_rules(rules_path)
     found = _search(queries, providers)
     summary = {"found": len(found), "matched": 0, "ready": 0, "posted": 0, "needs_human": 0, "skip": 0, "dup": 0}
-    for it in found:
+    _progress(running=True, total=len(found), processed=0, summary=summary, queries=queries)
+    for i, it in enumerate(found):
+        if i % 5 == 0:
+            _progress(running=True, total=len(found), processed=i, summary=summary, queries=queries,
+                      current=it.get('title', '')[:60], provider=it.get('provider', ''))
         rows = queue.load()
         url = it.get("url", "")
         if not url or any(r["source_url"] == url for r in rows):
@@ -112,7 +122,12 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
             queue.append({**base, "status": "skip", "removal_reason": "same_cafe_today"})
             summary["skip"] += 1
             continue
-        res = reply.build(text, channel, placement, qa)
+        try:
+            res = reply.build(text, channel, placement, qa)
+        except Exception as e:                 # 한 건의 API 지연이 실행 전체를 끊지 않게
+            queue.append({**base, "status": "skip", "removal_reason": "error", "why": f"{type(e).__name__}: {str(e)[:80]}"})
+            summary["skip"] += 1
+            continue
         if not res.get("ok"):
             queue.append({**base, "status": "skip", "removal_reason": "no_match", "why": res.get("why", "")})
             summary["skip"] += 1
@@ -158,4 +173,33 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
             summary["needs_human"] += 1
             if notify_human and publish:
                 notify(r_)
+            new_human.append(r_)
+    summary["human_new"] = len(new_human)
+    _progress(running=False, total=len(found), processed=len(found), summary=summary, queries=queries)
+    if notify_summary and new_human:
+        digest(new_human, summary)
     return summary
+
+
+PROGRESS = os.environ.get("GTM_PROGRESS", "data/run_status.json")
+
+
+def _progress(**kv) -> None:
+    """실행 진행 상황 — 관리자 화면이 몇 초마다 읽어 막대로 보여준다."""
+    kv["updated_at"] = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        os.makedirs(os.path.dirname(PROGRESS) or ".", exist_ok=True)
+        json.dump(kv, open(PROGRESS, "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def digest(rows: list[dict], summary: dict, top: int = 3) -> None:
+    """실행 요약 알림 — 사람 확인 후보 상위 몇 건을 붙여 넣을 초안과 함께 한 통으로 보낸다."""
+    best = sorted(rows, key=lambda r: -int(r.get("score") or 0))[:top]
+    head = (f"[리블 GTM] 발견 {summary['found']} · 매칭 {summary['matched']} · 사람 확인 {len(rows)}건"
+            f" (상위 {len(best)}건)")
+    parts = [head]
+    for r in best:
+        parts.append(f"\n— {r.get('where')} · 점수 {r.get('score')}\n{r.get('title', '')[:60]}\n글: {r.get('source_url')}\n\n{r.get('draft')}")
+    notify({"channel": "", "where": "", "source_url": "", "why": "", "draft": "", "_text": "\n".join(parts)})

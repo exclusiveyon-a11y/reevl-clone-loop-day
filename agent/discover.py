@@ -6,10 +6,17 @@ provider(= channel 값):
   daum_cafe · daum_web                  다음 검색 API(dapi.kakao.com/v2/search/{cafe,web})
                                         키 KAKAO_REST_API_KEY, 헤더 'Authorization: KakaoAK <키>'
   ppomppu                               뽐뿌 부동산포럼 공개 RSS(rss.php?id=house) — 키 없음
+  community                             국내 커뮤니티 — 다음 웹검색에 `site:<도메인>`을 붙여 찾는다(KAKAO_REST_API_KEY).
+                                        각 결과의 channel은 도메인별 이름(clien·ppomppu_web·dcinside·fmkorea·theqoo·
+                                        daangn·blind·mlbpark·bobaedream·ruliweb). 다음 호출은 하루 500회 상한(data/daum_calls.json).
+  youtube                               유튜브 — YouTube Data API v3(GOOGLE_API_KEY). 최근 영상의 댓글 중 질문 신호가
+                                        있는 것만 후보로. 하루 3,000단위 상한(무료 10,000의 30%, data/youtube_units.json).
 
 ★넣지 않은 것과 이유
   · 구글 Custom Search JSON API: 신규 가입이 막혔고(새 프로젝트는 403) 2027-01-01 종료 예정이다.
   · Brave 등: 카드 등록·종량 과금이 필요하다(무료로만 운영한다는 원칙).
+  · 82cook·instiz: 다음 site: 검색 결과 0건(2026-10-24 시험) — 넣지 않는다.
+  · 당근: 공식 API가 없다. 다음 검색에 색인된 동네생활 글만 잡힌다(적다).
 
 키는 agent.config.get으로 실행 시점에만 읽고 출력하지 않는다. 키가 없는 provider는 경고 후 건너뛴다.
 """
@@ -20,6 +27,7 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -56,8 +64,8 @@ def _get_json(url: str, headers: dict) -> dict:
 
 
 def _item(provider: str, *, url: str, title: str, desc: str, where: str, where_url: str,
-          rank: int, query: str, posted_at: str = "") -> dict:
-    return {"channel": provider, "url": url, "title": title, "desc": desc, "where": where,
+          rank: int, query: str, posted_at: str = "", channel: str | None = None) -> dict:
+    return {"channel": channel or provider, "url": url, "title": title, "desc": desc, "where": where,
             "where_url": where_url, "rank": rank, "query": query, "provider": provider,
             "posted_at": posted_at}
 
@@ -84,6 +92,24 @@ def _hub_budget() -> None:
         raise RuntimeError(f"네이버 검색 하루 상한 {HUB_DAILY_CAP}회 도달 — 내일 다시")
     os.makedirs(os.path.dirname(_CALLS) or ".", exist_ok=True)
     json.dump({today: n + 1}, open(_CALLS, "w", encoding="utf-8"))
+
+
+def _budget(path: str, cap: int, cost: int, label: str) -> None:
+    """오늘(KST) 사용량을 세고 상한을 넘으면 막는다. 세지 못하는 쪽보다 막는 쪽으로."""
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    try:
+        d = json.load(open(path, encoding="utf-8"))
+    except Exception:
+        d = {}
+    n = d.get(today, 0)
+    if n + cost > cap:
+        raise RuntimeError(f"{label} 하루 상한 {cap} 도달(오늘 {n}) — 내일 다시")
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    json.dump({today: n + cost}, open(path, "w", encoding="utf-8"))
+
+
+DAUM_DAILY_CAP = int(os.environ.get("GTM_DAUM_DAILY_CAP", "500"))
+_DAUM_CALLS = os.environ.get("GTM_DAUM_CALLS", "data/daum_calls.json")
 
 
 def _naver_keys() -> tuple[str | None, str | None, bool]:
@@ -131,6 +157,7 @@ def _daum(provider: str, query: str, n: int) -> list[dict]:
         raise RuntimeError("KAKAO_REST_API_KEY 없음 — 리블 .env 또는 환경 변수에 둘 것")
     url = DAUM_API[provider] + "?" + urllib.parse.urlencode(
         {"query": query, "sort": "recency", "size": max(1, min(n, 50))})
+    _budget(_DAUM_CALLS, DAUM_DAILY_CAP, 1, "다음 검색")
     docs = _get_json(url, {"Authorization": f"KakaoAK {key}"}).get("documents", [])
     out = []
     for rank, d in enumerate(docs):
@@ -146,6 +173,146 @@ def _daum(provider: str, query: str, n: int) -> list[dict]:
                          posted_at=d.get("datetime", "") or ""))
     return out
 
+
+# ── 국내 커뮤니티(다음 웹검색 site:) ───────────────────────────────────────
+# (도메인, channel, 표시명) — 2026-10-24 다음 site: 검색으로 결과가 오는 것만(82cook·instiz는 0건이라 제외).
+COMMUNITY = [
+    ("clien.net", "clien", "클리앙"),
+    ("ppomppu.co.kr", "ppomppu_web", "뽐뿌"),
+    ("dcinside.com", "dcinside", "디시인사이드"),
+    ("fmkorea.com", "fmkorea", "에펨코리아"),
+    ("theqoo.net", "theqoo", "더쿠"),
+    ("teamblind.com", "blind", "블라인드"),
+    ("mlbpark.donga.com", "mlbpark", "엠엘비파크"),
+    ("bobaedream.co.kr", "bobaedream", "보배드림"),
+    ("ruliweb.com", "ruliweb", "루리웹"),
+    ("daangn.com", "daangn", "당근 동네생활"),
+]
+
+
+def _community_domains() -> list[tuple[str, str, str]]:
+    """GTM_COMMUNITY_DOMAINS(쉼표 구분 도메인)로 좁힐 수 있다. 기본은 위 목록 전부."""
+    pick = [d.strip() for d in os.environ.get("GTM_COMMUNITY_DOMAINS", "").split(",") if d.strip()]
+    return [c for c in COMMUNITY if not pick or c[0] in pick]
+
+
+def _board(domain: str, url: str) -> str:
+    """URL에 게시판·갤러리 id가 있으면 꺼낸다(표시용)."""
+    u = urllib.parse.urlparse(url)
+    qs = urllib.parse.parse_qs(u.query)
+    if domain == "dcinside.com":
+        return (qs.get("id") or [""])[0]
+    if domain == "ppomppu.co.kr":
+        return (qs.get("id") or [""])[0]
+    if domain == "mlbpark.donga.com":
+        return (qs.get("b") or [""])[0]
+    if domain == "bobaedream.co.kr":
+        return (qs.get("code") or [""])[0]
+    m = re.search(r"/service/board/([^/]+)/", u.path) if domain == "clien.net" else None
+    if m:
+        return m.group(1)
+    if domain == "theqoo.net":
+        seg = [x for x in u.path.split("/") if x]
+        return seg[0] if seg and not seg[0].isdigit() else ""
+    return ""
+
+
+def _kst(iso: str) -> str:
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(KST).isoformat(timespec="seconds")
+    except (TypeError, ValueError):
+        return iso or ""
+
+
+def _community(query: str, n: int) -> list[dict]:
+    key = config.get("KAKAO_REST_API_KEY")
+    if not key:
+        raise RuntimeError("KAKAO_REST_API_KEY 없음 — 리블 .env 또는 환경 변수에 둘 것")
+    out = []
+    for domain, channel, name in _community_domains():
+        url = DAUM_API["daum_web"] + "?" + urllib.parse.urlencode(
+            {"query": f"site:{domain} {query}", "sort": "recency", "size": max(1, min(n, 10))})
+        _budget(_DAUM_CALLS, DAUM_DAILY_CAP, 1, "다음 검색")
+        try:
+            docs = _get_json(url, {"Authorization": f"KakaoAK {key}"}).get("documents", [])
+        except Exception as e:  # noqa: BLE001 — 한 도메인 실패가 나머지를 막지 않게
+            _warn(f"community/{domain} 실패({type(e).__name__}) — 이 도메인만 건너뜀")
+            continue
+        for rank, d in enumerate(docs):
+            link = d.get("url", "")
+            if domain not in urllib.parse.urlparse(link).netloc:
+                continue                      # site: 연산자가 새는 결과는 버린다
+            board = _board(domain, link)
+            out.append(_item("community", channel=channel, url=link, title=_clean(d.get("title")),
+                             desc=_clean(d.get("contents")), where=f"{name}/{board}" if board else name,
+                             where_url=f"https://{domain}/", rank=rank, query=query,
+                             posted_at=_kst(d.get("datetime", "") or "")))
+    return out
+
+
+# ── 유튜브(YouTube Data API v3) ────────────────────────────────────────────
+YT_API = "https://www.googleapis.com/youtube/v3/"
+YT_DAILY_UNITS = int(os.environ.get("GTM_YOUTUBE_DAILY_UNITS", "3000"))   # 무료 10,000의 30%
+_YT_UNITS = os.environ.get("GTM_YOUTUBE_UNITS", "data/youtube_units.json")
+YT_QUESTION = re.compile(r"\?|？|고민|어디|추천|괜찮|궁금|vs|VS|비교")
+
+
+def _yt_get(endpoint: str, params: dict, cost: int) -> dict:
+    """할당량을 먼저 세고 부른다. 403은 이유(API 미사용·키 제한·할당량 초과)를 그대로 올린다."""
+    key = config.get("GOOGLE_API_KEY")
+    if not key:
+        raise RuntimeError("GOOGLE_API_KEY 없음 — 리블 .env 또는 환경 변수에 둘 것")
+    _budget(_YT_UNITS, YT_DAILY_UNITS, cost, "유튜브 할당량(단위)")
+    url = YT_API + endpoint + "?" + urllib.parse.urlencode({**params, "key": key})
+    try:
+        return _get_json(url, {})
+    except urllib.error.HTTPError as e:
+        reason = ""
+        try:
+            err = json.loads(e.read().decode("utf-8", "replace")).get("error", {})
+            reason = (err.get("errors") or [{}])[0].get("reason", "") or err.get("status", "")
+        except Exception:  # noqa: BLE001
+            pass
+        why = {"accessNotConfigured": "YouTube Data API 미사용 설정(프로젝트에서 API를 켜야 함)",
+               "SERVICE_DISABLED": "YouTube Data API 미사용 설정(프로젝트에서 API를 켜야 함)",
+               "quotaExceeded": "YouTube 일일 할당량 초과",
+               "keyInvalid": "API 키가 유효하지 않음",
+               "forbidden": "키 제한(리퍼러·IP·API 제한)으로 거부",
+               "commentsDisabled": "이 영상은 댓글이 꺼져 있음",
+               "API_KEY_SERVICE_BLOCKED": "키 제한으로 YouTube API 차단"}.get(reason, reason or str(e))
+        raise RuntimeError(f"YouTube {e.code}: {why}") from None
+
+
+def _youtube(query: str, n: int) -> list[dict]:
+    res = _yt_get("search", {"part": "snippet", "type": "video", "q": query, "regionCode": "KR",
+                             "relevanceLanguage": "ko", "order": "date", "maxResults": 5}, 100)
+    out = []
+    for v in res.get("items", []):
+        vid = (v.get("id") or {}).get("videoId")
+        sn = v.get("snippet") or {}
+        if not vid:
+            continue
+        try:
+            th = _yt_get("commentThreads", {"part": "snippet", "videoId": vid, "maxResults": 20,
+                                            "order": "relevance", "textFormat": "plainText"}, 1)
+        except RuntimeError as e:
+            if "댓글이 꺼져" in str(e):
+                continue
+            raise
+        for t in th.get("items", []):
+            top = ((t.get("snippet") or {}).get("topLevelComment") or {})
+            c = top.get("snippet") or {}
+            body = (c.get("textDisplay") or c.get("textOriginal") or "").strip()
+            if not body or not YT_QUESTION.search(body):
+                continue
+            # 작성자 이름·채널은 저장하지 않는다 — 질문 본문과 위치만.
+            out.append(_item("youtube", url=f"https://www.youtube.com/watch?v={vid}&lc={top.get('id', '')}",
+                             title=_clean(sn.get("title")), desc=body[:300], where=_clean(sn.get("channelTitle")),
+                             where_url=f"https://www.youtube.com/watch?v={vid}", rank=len(out), query=query,
+                             posted_at=_kst(c.get("publishedAt", ""))))
+            if len(out) >= n:
+                return out
+    return out
 
 # ── 뽐뿌 부동산포럼 RSS ───────────────────────────────────────────────────
 
@@ -179,17 +346,20 @@ def _ppomppu_match(feed: list[dict], query: str) -> list[dict]:
 
 # ── 공개 인터페이스 ──────────────────────────────────────────────────────
 
-ALL_PROVIDERS = ["naver_cafe", "naver_kin", "naver_blog", "daum_cafe", "daum_web", "ppomppu"]
+ALL_PROVIDERS = ["naver_cafe", "naver_kin", "naver_blog", "daum_cafe", "daum_web", "ppomppu",
+                 "community", "youtube"]
 
 
 def available() -> list[str]:
     """키가 있는 provider 전부 + ppomppu(공개 RSS)."""
     out = []
-    cid, sec = _naver_keys()
+    cid, sec, _ = _naver_keys()
     if cid and sec:
         out += ["naver_cafe", "naver_kin", "naver_blog"]
     if config.get("KAKAO_REST_API_KEY"):
-        out += ["daum_cafe", "daum_web"]
+        out += ["daum_cafe", "daum_web", "community"]
+    if config.get("GOOGLE_API_KEY"):
+        out += ["youtube"]
     return out + ["ppomppu"]
 
 
@@ -201,6 +371,10 @@ def search(query: str, channel: str = "naver_cafe", n: int = 20) -> list[dict]:
         return _daum(channel, query, n)
     if channel == "ppomppu":
         return _ppomppu_match(_ppomppu_feed(), query)[:n]
+    if channel == "community":
+        return _community(query, n)
+    if channel == "youtube":
+        return _youtube(query, n)
     raise ValueError(f"알 수 없는 provider: {channel} (가능: {ALL_PROVIDERS})")
 
 

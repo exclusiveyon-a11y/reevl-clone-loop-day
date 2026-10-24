@@ -10,10 +10,14 @@ import urllib.parse
 from . import CAMPAIGN, QA_CAMPAIGN
 
 SITE = "https://reevl.co.kr"
-SOURCES = {"naver_cafe", "naver_kin", "naver_blog", "daum_cafe", "daum_web", "ppomppu", "copy", "web_share"}
+COMMUNITY_CHANNELS = ("clien", "ppomppu_web", "dcinside", "fmkorea", "theqoo", "blind", "mlbpark", "bobaedream",
+                      "ruliweb", "daangn")
+SOURCES = {"naver_cafe", "naver_kin", "naver_blog", "daum_cafe", "daum_web", "ppomppu", "copy", "web_share",
+           "youtube", *COMMUNITY_CHANNELS}
 MEDIUM = {"naver_cafe": "community", "naver_kin": "community", "naver_blog": "community",
           "daum_cafe": "community", "daum_web": "community", "ppomppu": "community",
-          "copy": "share", "web_share": "share"}
+          "copy": "share", "web_share": "share", "youtube": "video",
+          **{c: "community" for c in COMMUNITY_CHANNELS}}
 CONTENT = {"compare", "screener", "housing", "complex", "hub"}
 
 

@@ -47,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--provider", action="append"); rn.add_argument("--publish", action="store_true")
     rn.add_argument("--cap", type=int, default=3); rn.add_argument("--rules", default="data/rules.json")
     rn.add_argument("--qa", action="store_true")
+    rn.add_argument("--notify", action="store_true", help="사람 확인 후보 상위 3건을 텔레그램으로 요약 알림")
 
     q = sub.add_parser("queue", help="수요 후보 큐")
     qs = q.add_subparsers(dest="qcmd", required=True)
@@ -76,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         qs_ = _queries(a)
         if not qs_:
             ap.error("--query 또는 --keywords-file 필요")
-        print(json.dumps(pipeline.run(qs_, a.provider, a.publish, a.cap, a.rules, a.qa), ensure_ascii=False))
+        print(json.dumps(pipeline.run(qs_, a.provider, a.publish, a.cap, a.rules, a.qa, notify_summary=a.notify), ensure_ascii=False))
         return 0
     if a.cmd == "human":
         rows = [r_ for r_ in queue.load() if r_["status"] in ("needs_human", "ready")]
