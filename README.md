@@ -1,27 +1,29 @@
-# 🏠 REEVL GTM Agent — 부동산 질문을 실제 데이터로 연결하는 Growth Loop
+# REEVL GTM Agent
+
+부동산 질문을 실제 데이터로 연결하는 Growth Loop
 
 **광고를 뿌리는 대신, 사람들이 이미 묻고 있는 부동산 질문에 데이터로 답합니다.**
 
-[Clone Loop Day in Seoul](https://luma.com/a1bags64) (2026-10-24, NAVER D2SF · Agentic GTM) 출품작 · 🌐 https://reevl.co.kr
+[Clone Loop Day in Seoul](https://luma.com/a1bags64) (2026-10-24, NAVER D2SF · Agentic GTM) 출품작, https://reevl.co.kr
 
-### 🏢 Product — REEVL
+### Product
 
 리블(Reevl)은 전국 약 4.6만 개 아파트 단지와 12개 부동산 유형의 실거래·입지 정보를 분석하는 무료 AI 부동산 데이터 플랫폼입니다.
 전국 실거래가, 학군, 교통, 전세가율, 거래량 등을 연결하고, 자체 AI 기반 가격 전망·수요강도 분석과 단지 비교·조건별 스크리너를 제공합니다.
 
-### 🔄 Our Agentic Loop
+### Our Agentic Loop
 
 **Discover → Match → Answer → Review → Measure → Improve**
 
-1. **Discover:** 네이버 카페·지식iN·유튜브·국내 부동산 커뮤니티에서 실제 주거 질문 탐지 — 공식 API만 사용(`agent/discover.py`)
+1. **Discover:** 네이버 카페·지식iN·유튜브·국내 부동산 커뮤니티에서 실제 주거 질문 탐지. 공식 API만 사용(`agent/discover.py`)
 2. **Match:** 질문에 등장하는 단지·학교·역·지역을 리블 데이터와 자동 매칭(`agent/match.py`, `agent/hubs.py`)
 3. **Answer:** 검증된 실거래 데이터로 답하는 2~3줄 요약과 맞춤 비교·분석 딥링크 생성(`agent/intent.py`, `agent/reply.py`)
-4. **Review:** Claude Haiku/Sonnet으로 정확성과 관련성 평가. 게시 정책에 맞춰 검수·발행하고 리블과의 관계 공개 — *Day 0은 규칙 기반 점수·코드 검증으로 동작, Claude 판정·심사는 D1~D2 적용([설계·예산](docs/06-claude-plan.md))*
+4. **Review:** Claude Haiku/Sonnet으로 정확성과 관련성 평가. 게시 정책에 맞춰 검수·발행하고 리블과의 관계 공개. *Day 0은 규칙 기반 점수·코드 검증으로 동작, Claude 판정·심사는 D1~D2 적용([설계·예산](docs/06-claude-plan.md))*
 5. **Measure & Improve:** GA4로 유입·참여·재방문을 추적하고 매일 성과에 따라 다음 질문 선정과 답변 방식 개선(`analysis/ga_report.py`, [실험 로그](docs/07-loop-log.md))
 
 **차별점:** 기존 GTM Agent가 잠재고객에게 메시지를 보내는 방식이라면, 리블은 이미 존재하는 부동산 질문을 실제 데이터와 연결해 '공유 가능한 답변'으로 바꿉니다.
 
-### 🧪 Day 0 — Initial Validation
+### Day 0 Initial Validation
 
 - 커뮤니티 콘텐츠 **365건 탐지** (네이버 카페·지식iN·다음 카페·디시·블라인드·클리앙·에펨·뽐뿌·엠팍·더쿠, 유튜브 별도 시험)
 - 질문 적합성·데이터 매칭·스코어링 통과 **12건**
@@ -30,7 +32,7 @@
 
 리블의 기존 사용자는 네이버 검색에 집중되어 있지만, 커뮤니티에서 자연스럽게 공유된 아파트 비교 링크는 높은 참여도를 보였습니다. 이 현상을 반복 가능한 GTM Loop로 확장하고 있습니다.
 
-### 🎯 7-Day Goals — Until Oct 31, 18:00 KST
+### 7-Day Goals (until Oct 31, 18:00 KST)
 
 | Metric | Baseline | Target |
 |---|---:|---:|
@@ -48,13 +50,15 @@ AI 평가 예산은 하루 최대 $2로 제한하며, 커뮤니티 정책과 게
 
 > 사람들이 집을 고민하는 순간, 광고보다 검증 가능한 데이터와 바로 열리는 비교 결과를 제공하는 것이 더 효과적인 성장 방법일 수 있다.
 
-**GitHub:** https://github.com/exclusiveyon-a11y/reevl-clone-loop-day · **Service:** https://reevl.co.kr · **7-Day Experiment Log:** [`docs/07-loop-log.md`](docs/07-loop-log.md)
+**GitHub:** https://github.com/exclusiveyon-a11y/reevl-clone-loop-day  
+**Service:** https://reevl.co.kr  
+**7-Day Experiment Log:** [`docs/07-loop-log.md`](docs/07-loop-log.md)
 
 ---
 
-![GTM Agent 관제 콘솔 — 찾은 글이 질문 판정·매칭·초안·점수를 거쳐 통과/제외로 갈리는 과정](docs/media/console.gif)
+![GTM Agent 관제 콘솔: 찾은 글이 질문 판정·매칭·초안·점수를 거쳐 통과/제외로 갈리는 과정](docs/media/console.gif)
 
-▶ [작동 영상 (MP4, 19초)](docs/media/console.mp4) · [정지 화면](docs/media/console.png) · [모바일](docs/media/console-mobile.png) — 예시 데이터로 녹화한 데모 모드(`python -m agent.admin --demo`)다. 실제 실행 화면은 커뮤니티 글 제목이 담겨 공개하지 않는다.
+[작동 영상 (MP4, 19초)](docs/media/console.mp4) · [정지 화면](docs/media/console.png) · [모바일](docs/media/console-mobile.png). 예시 데이터로 녹화한 데모 모드(`python -m agent.admin --demo`)다. 실제 실행 화면은 커뮤니티 글 제목이 담겨 공개하지 않는다.
 
 ```mermaid
 flowchart LR
@@ -107,22 +111,22 @@ flowchart LR
 
 ## 하는 일
 
-1. **질문 찾기** — 공식 API로만 모은다: 네이버(카페·지식iN·블로그, NAVER API HUB), 다음(카페·웹), 다음 웹검색 `site:`로 국내 커뮤니티(클리앙·뽐뿌·디시 부동산갤·에펨·더쿠·블라인드·엠팍·보배·루리웹·당근), 뽐뿌 부동산 RSS, 유튜브 댓글(YouTube Data API). 로그인 수집·우회는 하지 않는다. 소스마다 하루 호출 상한을 둔다.
-2. **리블 페이지 매칭** — 글에 나온 단지·학교·역·시공사를 리블 공개 API와 공개 사이트맵에서 찾는다. 지역 맥락이 없어 애매하면 고르지 않는다.
-3. **페인포인트 맞춤 댓글** — 글의 고민(비교·시세·학군·전세·재건축·출퇴근)을 잡아 확인된 실거래로 먼저 답하고, 리블에서 그 고민을 푸는 기능을 링크 하나로 건다. 2~3줄, 채널 말투(해요체·음슴체·유튜브 링크 없음), 끝에 짧은 관계 공개.
-4. **점수와 규칙 판정** — 질문 적합도·데이터·최신성·채널 규칙 점수가 8점 이상이고 규칙이 확인된 채널만 게시 대상이 된다.
-5. **게시와 대기열** — 허용 채널이면 운영자 계정으로 로그인된 Aside 브라우저가 댓글을 달고, 화면에 실제로 올라갔는지 되읽는다. 실패하거나 미지원 채널이면 사람 대기열로 넘긴다.
+1. **질문 찾기**: 공식 API로만 모은다: 네이버(카페·지식iN·블로그, NAVER API HUB), 다음(카페·웹), 다음 웹검색 `site:`로 국내 커뮤니티(클리앙·뽐뿌·디시 부동산갤·에펨·더쿠·블라인드·엠팍·보배·루리웹·당근), 뽐뿌 부동산 RSS, 유튜브 댓글(YouTube Data API). 로그인 수집·우회는 하지 않는다. 소스마다 하루 호출 상한을 둔다.
+2. **리블 페이지 매칭**: 글에 나온 단지·학교·역·시공사를 리블 공개 API와 공개 사이트맵에서 찾는다. 지역 맥락이 없어 애매하면 고르지 않는다.
+3. **페인포인트 맞춤 댓글**: 글의 고민(비교·시세·학군·전세·재건축·출퇴근)을 잡아 확인된 실거래로 먼저 답하고, 리블에서 그 고민을 푸는 기능을 링크 하나로 건다. 2~3줄, 채널 말투(해요체·음슴체·유튜브 링크 없음), 끝에 짧은 관계 공개.
+4. **점수와 규칙 판정**: 질문 적합도·데이터·최신성·채널 규칙 점수가 8점 이상이고 규칙이 확인된 채널만 게시 대상이 된다.
+5. **게시와 대기열**: 허용 채널이면 운영자 계정으로 로그인된 Aside 브라우저가 댓글을 달고, 화면에 실제로 올라갔는지 되읽는다. 실패하거나 미지원 채널이면 사람 대기열로 넘긴다.
 
 ## 안전장치
 
-- **관계 공개** — 모든 댓글 끝에 짧은 공개 문구("제가 만든 서비스라 참고만 하세요")를 붙인다. 표시광고법 추천·보증 심사지침상 운영자의 자기 서비스 소개는 이해관계 공개 대상이다. 공개 없이 일반 사용자처럼 쓰는 기능은 만들지 않는다.
-- **자동 게시 중지(기본)** — `GTM_AUTOPUBLISH=1`을 켜기 전에는 `--publish`를 줘도 실제로 등록하지 않고 사람 대기열로 보낸다.
-- **규칙 allowlist** — `data/rules.json`에 카페별 규칙 확인(허용 여부·공지 URL·확인일)이 없으면 자동 게시는 0건이다. 형식은 [examples/rules.example.json](examples/rules.example.json).
-- **하루 최대 3건** — 게시량은 성과가 아니다. 허용 질문이 없으면 0건이 정상이다.
+- **관계 공개**: 모든 댓글 끝에 짧은 공개 문구("제가 만든 서비스라 참고만 하세요")를 붙인다. 표시광고법 추천·보증 심사지침상 운영자의 자기 서비스 소개는 이해관계 공개 대상이다. 공개 없이 일반 사용자처럼 쓰는 기능은 만들지 않는다.
+- **자동 게시 중지(기본)**: `GTM_AUTOPUBLISH=1`을 켜기 전에는 `--publish`를 줘도 실제로 등록하지 않고 사람 대기열로 보낸다.
+- **규칙 allowlist**: `data/rules.json`에 카페별 규칙 확인(허용 여부·공지 URL·확인일)이 없으면 자동 게시는 0건이다. 형식은 [examples/rules.example.json](examples/rules.example.json).
+- **하루 최대 3건**: 게시량은 성과가 아니다. 허용 질문이 없으면 0건이 정상이다.
 - **같은 문구 재게시 금지**, 같은 질문 중복 답변 금지.
 - **삭제·신고·운영자 경고가 생기면 그 채널을 즉시 멈춘다.** 링크를 변형해 다시 올리지 않는다.
-- **표기하지 않는 것** — AI 전망, 순위, 호가, 상승 보장, 매수 추천, 학교 배정 확정(배정은 관할 교육청 확인으로 안내).
-- **빈 값 차단** — 자리표시자나 빈 수치가 남은 초안은 만들지 않는다.
+- **표기하지 않는 것**: AI 전망, 순위, 호가, 상승 보장, 매수 추천, 학교 배정 확정(배정은 관할 교육청 확인으로 안내).
+- **빈 값 차단**: 자리표시자나 빈 수치가 남은 초안은 만들지 않는다.
 
 ## 빠른 시작
 
@@ -158,7 +162,7 @@ https://reevl.co.kr/c/ZaFYk94S (제가 만든 서비스라 참고만 하세요)
 | `GTM_AUTOPUBLISH=1 python -m agent run --publish` | 위 과정 + 허용 채널에 Aside로 게시, 실패는 사람에게 (**기본 꺼짐**) | 검색 키, Aside 앱 로그인, `data/rules.json` |
 | `python -m agent queue list` | 후보·상태·점수 보기 | 없음 |
 | `python -m agent human` | 사람이 게시할 대기열과 초안 보기 | 없음 |
-| `python -m agent.admin` | **관리자 화면**(http://127.0.0.1:8799) — 단계별 건수, 후보 카드, 초안 복사, 게시 완료·제외 표시 | 없음 (`--demo`는 예시 데이터) |
+| `python -m agent.admin` | **관리자 화면**(http://127.0.0.1:8799): 단계별 건수, 후보 카드, 초안 복사, 게시 완료·제외 표시 | 없음 (`--demo`는 예시 데이터) |
 
 관리자 화면은 내 컴퓨터(127.0.0.1)에서만 열린다. 커뮤니티 글 주소와 초안이 담기기 때문에 공개 페이지로 만들지 않는다.
 
@@ -194,4 +198,4 @@ https://reevl.co.kr/c/ZaFYk94S (제가 만든 서비스라 참고만 하세요)
 - 검색: NAVER API HUB 검색(카페글·지식iN·블로그), 카카오 다음 검색 API(카페·웹 `site:` 커뮤니티), YouTube Data API v3, 뽐뿌 RSS
 - 판정·심사(D1~): Claude Haiku 5.5 · Sonnet 5.5 (Messages·Batch API, 하루 $2 상한)
 - 게시: Aside 브라우저 CLI
-- 행사: Clone Loop Day in Seoul — Clone, OpenAI, NAVER D2SF, Deepest
+- 행사: Clone Loop Day in Seoul (Clone, OpenAI, NAVER D2SF, Deepest)
