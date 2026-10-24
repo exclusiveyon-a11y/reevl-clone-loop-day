@@ -1,9 +1,8 @@
 """게시글 → 짧은 댓글 초안. 글쓴이의 고민(의도)을 잡고, 확인된 실거래로 먼저 답한 뒤, 리블에서 그걸 푸는 방법을 링크 하나로.
 
-형식(2~4줄, 커뮤니티 해요체):
-  ①고민을 짚는 한 마디 + 데이터로 답(실거래 날짜·면적·가격)
-  ②리블에서 되는 것 한 줄
-  ③짧은 링크 하나 + 짧은 관계 공개("제가 만든 서비스라 참고만요")
+형식(두 줄, 2026-10-24 사용자 확정):
+  ①글쓴이가 말한 평형 기준 실거래로 답(괄호·날짜 없음)
+  ②"제가 운영하는 리블에 … 정리해 뒀어요 <링크>" — 관계 공개를 문장 안에
 
 - 관계 공개는 빼지 않는다(표시광고법 추천·보증 심사지침 — 운영자의 자기 서비스 홍보는 이해관계 공개 대상).
 - 링크는 하나. 비교면 리블 단축 링크(/c/키), 단지 하나면 단지 주소, 단지가 없을 때만 학교·역 허브.
@@ -85,7 +84,7 @@ def build(text: str, channel: str = "copy", placement: str | None = None, qa: bo
     cs, via = [], "rule"
     if entities and entities.get("complexes"):
         try:
-            cs = match.complexes_from_entities(entities)
+            cs = match.complexes_from_entities(entities, text=text)
             via = "entities" if cs else "rule"
         except Exception:
             cs = []
@@ -94,7 +93,13 @@ def build(text: str, channel: str = "copy", placement: str | None = None, qa: bo
         #   규칙 매칭이 '목동 진도2차'를 금천구 독산동 진도2차로 잡아 틀린 실거래를 쓴 적이 있다(2026-10-24).
         return {"ok": False, "why": "추출한 단지를 리블에서 확정하지 못함(동명 단지·표기 차이) — 틀린 단지를 쓰지 않으려 제외",
                 "complexes": [], "hubs": [], "fit": 0, "data": 0, "match_via": "entities_none"}
-    if not cs:
+    if len(cs) == 1 and entities and entities.get("concern") == "compare":
+        # 비교 질문에 한 단지만 답하면 반쪽 답이다(10-24 '부평현대2차 vs 부개주공3단지'에 현대2차만 답한 초안이 심사를 통과)
+        return {"ok": False, "why": "비교 질문인데 두 단지를 모두 확정하지 못함", "complexes": cs, "hubs": [], "fit": 0, "data": 0,
+                "match_via": "entities_half"}
+    if not cs and entities is None:
+        # 규칙 매칭은 Claude 없이 돌 때만 쓴다. Claude가 읽고도 단지를 못 뽑은 글에서 규칙 매칭은
+        # '서촌 한옥'→인천 하나아파트, '김포'→'김포'라는 단지처럼 틀린 단지를 잡았다(10-24 지식iN, 심사도 통과).
         try:
             cs = match.complexes(text)
         except Exception as e:
@@ -132,7 +137,13 @@ def build(text: str, channel: str = "copy", placement: str | None = None, qa: bo
                     last = max(pool, key=lambda t: t["date"])
                     parts.append(f"{c['name']} {eok(last['price'])}")
                     facts.append(_fact(c['name'], last, today))
-            head = f"같은 {round(band_all)}㎡ 기준 최근 실거래는" if band_all is not None else "최근 실거래는"
+            areas = sorted(round(float(f.split("전용 ")[1].split("㎡")[0])) for f in facts)
+            if band_all is None or not areas:
+                head = "최근 실거래는"
+            elif areas[0] == areas[-1]:
+                head = f"같은 {areas[0]}㎡ 기준 최근 실거래는"
+            else:   # 띠 안에서도 면적이 다르면 '같은'이라 쓰지 않는다(77㎡ vs 80㎡를 '같은 77㎡'로 썼다)
+                head = f"전용 {areas[0]}~{areas[-1]}㎡ 기준 최근 실거래는"
         if len(parts) < 2:
             return {"ok": False, "why": "비교할 실거래가 부족합니다", "complexes": cs, "hubs": hs, "fit": 0, "data": 0}
         lines.append(f"{head} {', '.join(parts)}이에요.")

@@ -51,6 +51,8 @@ REVIEW_SYSTEM = """너는 커뮤니티 답글의 발행 전 심사자다. 아래
 ※ 링크 개수는 'http'로 시작하는 주소의 개수다. 주소 안의 %7C 같은 인코딩 문자는 같은 링크의 일부다.
 6. 링크 2개 이상
 7. 과장·비방·다른 서비스 깎아내리기
+8. 질문과 어긋난 답 — 답글의 단지·지역이 question이 묻는 단지·지역과 다르거나(질문에 없는 다른 도시의 단지 등), 질문의 고민에 답하지 않음.
+   question이 비어 있으면 이 항목은 보지 않는다.
 
 통과면 pass=true, issues=[]. 고칠 수 있으면 fixed_draft에 고친 전문(링크·공개 문구 유지, 숫자 변경 금지). confidence는 판정 확신(0~1)."""
 
@@ -102,11 +104,11 @@ def triage(post_title: str, post_text: str, channel: str, where: str, matched: d
     return out, usd
 
 
-def review(draft: str, facts: list[str], channel: str, model: str = claude.HAIKU) -> tuple[dict, float]:
+def review(draft: str, facts: list[str], channel: str, model: str = claude.HAIKU, question: str = "") -> tuple[dict, float]:
     issues = code_check(draft, facts)
     if issues:                                   # 코드에서 걸리면 Claude를 부르지 않는다(비용 0)
         return {"pass": False, "issues": issues, "confidence": 1.0, "by": "code"}, 0.0
-    user = json.dumps({"channel": channel, "draft": draft, "facts": facts}, ensure_ascii=False)
+    user = json.dumps({"channel": channel, "question": question[:1200], "draft": draft, "facts": facts}, ensure_ascii=False)
     out, usd = claude.call_tool(model, REVIEW_SYSTEM, user, "review", REVIEW_SCHEMA,
                                 "답글 심사 결과를 기록한다", max_tokens=600)
     out["pass"] = bool(out.get("pass"))
@@ -116,12 +118,14 @@ def review(draft: str, facts: list[str], channel: str, model: str = claude.HAIKU
     return out, usd
 
 
-def review_two_stage(draft: str, facts: list[str], channel: str, ambiguous: float = 0.7) -> tuple[dict, float]:
-    """Haiku 심사 → 확신이 ambiguous 미만이면 Opus로 2차 심사(그 결과를 따른다)."""
-    r1, c1 = review(draft, facts, channel)
+def review_two_stage(draft: str, facts: list[str], channel: str, ambiguous: float = 0.7,
+                     question: str = "") -> tuple[dict, float]:
+    """Haiku 심사 → 확신이 ambiguous 미만이면 Opus로 2차 심사(그 결과를 따른다).
+    question(원글)을 같이 넘긴다 — 10-24 지식iN에서 원글 없이 심사해 '김포' 질문에 '김포'라는 단지를 답한 초안이 통과했다."""
+    r1, c1 = review(draft, facts, channel, question=question)
     if r1.get("by") == "code" or r1.get("confidence", 0) >= ambiguous:
         return r1, c1
-    r2, c2 = review(draft, facts, channel, model=claude.OPUS)
+    r2, c2 = review(draft, facts, channel, model=claude.OPUS, question=question)
     r2["first"] = {"pass": r1.get("pass"), "confidence": r1.get("confidence")}
     return r2, c1 + c2
 

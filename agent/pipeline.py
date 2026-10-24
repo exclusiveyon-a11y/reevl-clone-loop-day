@@ -18,12 +18,14 @@ from datetime import datetime
 
 import re
 
-from . import claude, config, intent, judge, poster, queue, reply
+from . import claude, config, discover, intent, judge, poster, queue, reply
 from .queue import KST
 
 # 질문 신호 — 묻는 글에만 답한다. 광고 신호 — 중개 매물·분양 홍보 글은 건너뛴다.
 QUESTION = re.compile(r"\?|？|고민|어디|어떤가요|어떨까요|괜찮|추천|vs|VS|비교|질문|문의|궁금|조언|선택|어느")
 AD = re.compile(r"급매|매물|분양\s*문의|상담\s*문의|공인중개|중개사무소|입주자\s*모집|모델하우스|☎|010-\d")
+
+STALE_DAYS = int(os.environ.get("GTM_STALE_DAYS", "14"))
 
 SAMPLE_RULES = {"naver_cafe": {"<카페명>": {"allowed": True, "rule_url": "<게시판 공지 URL>", "checked_at": "YYYY-MM-DD"}}}
 
@@ -129,9 +131,21 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
             _append({**base, "status": "skip", "removal_reason": "not_question"})
             summary["skip"] += 1
             continue
+        # 오래된 질문은 답하지 않는다(이미 결론 난 글에 링크만 남는다). 지식iN은 날짜를 페이지에서 읽는다.
+        posted = it.get("posted_at") or (discover.kin_date(url) if channel == "naver_kin" else "")
+        if posted:
+            try:
+                age = (datetime.now(KST).date() - datetime.fromisoformat(posted[:10]).date()).days
+            except ValueError:
+                age = 0
+            if age > STALE_DAYS:
+                _append({**base, "status": "skip", "removal_reason": "stale", "why": f"작성 {posted[:10]} — {age}일 지난 질문"})
+                summary["skip"] += 1
+                continue
         _emit('question', cur['id'], ok=True)
         # 같은 카페는 한 번 실행에 한 글만 사람에게 넘긴다(도배 방지 — 게시 상한과 별개).
-        if where and any(r.get("where") == where and r.get("status") in ("ready", "needs_human")
+        # 지식iN은 where가 사이트 전체('지식iN')라 이 규칙을 걸면 하루 한 질문만 남는다 — 하루 게시 상한으로만 막는다.
+        if where and channel != "naver_kin" and any(r.get("where") == where and r.get("status") in ("ready", "needs_human")
                          and r.get("found_at", "")[:10] == datetime.now(KST).strftime("%Y-%m-%d") for r in rows):
             _append({**base, "status": "skip", "removal_reason": "same_cafe_today"})
             summary["skip"] += 1
@@ -213,7 +227,7 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
                 cands.append(("rule", res["text"]))
                 passed, last = None, None
                 for src, txt in cands:
-                    rev, c4 = judge.review_two_stage(txt, res.get("facts", []), channel)
+                    rev, c4 = judge.review_two_stage(txt, res.get("facts", []), channel, question=text)
                     spent_ += c4
                     _emit('ai_review', cur['id'], ok=bool(rev.get("pass")), issues=rev.get("issues", [])[:4],
                           by=rev.get("by", ""), draft_by=src)

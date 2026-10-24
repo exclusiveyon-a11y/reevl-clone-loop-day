@@ -143,7 +143,10 @@ def _naver(provider: str, query: str, n: int) -> list[dict]:
             posted = f"{pd[:4]}-{pd[4:6]}-{pd[6:8]}" if re.fullmatch(r"\d{8}", pd or "") else ""
         else:  # naver_kin — 검색 API가 작성일을 주지 않는다
             where, where_url, posted = "지식iN", "https://kin.naver.com/", ""
-        out.append(_item(provider, url=it.get("link", ""), title=_clean(it.get("title")),
+        link = it.get("link", "")
+        if provider == "naver_kin":   # 같은 질문이 답변마다(&answerNo=N) 따로 나온다 — 질문 주소로 합친다
+            link = re.sub(r"&answerNo=\d+", "", link)
+        out.append(_item(provider, url=link, title=_clean(it.get("title")),
                          desc=_clean(it.get("description")), where=where, where_url=where_url,
                          rank=rank, query=query, posted_at=posted))
     return out
@@ -361,6 +364,18 @@ def available() -> list[str]:
     if (config.get("YOUTUBE_API_KEY") or config.get("GOOGLE_API_KEY")):
         out += ["youtube"]
     return out + ["ppomppu"]
+
+
+def kin_date(url: str) -> str:
+    """지식iN 질문 작성일('2026-10-22'). 검색 API가 날짜를 주지 않아 질문 페이지에서 읽는다 — 질문 필터를 통과한 글만 부른다.
+    10-24 실측: 날짜순 검색에도 2023~2024년 질문이 섞여 나왔다."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        html = urllib.request.urlopen(req, timeout=10).read().decode("utf-8", "ignore")
+    except Exception:
+        return ""
+    m = re.search(r"작성일</span>\s*(\d{4})\.(\d{2})\.(\d{2})", html)
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else ""
 
 
 def search(query: str, channel: str = "naver_cafe", n: int = 20) -> list[dict]:

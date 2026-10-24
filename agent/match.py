@@ -12,6 +12,10 @@ from . import reevl
 STOP = set("아파트 단지 비교 고민 어디 어떤 추천 실거주 매매 전세 월세 투자 가격 시세 질문 문의 지금 요즘 근처 주변 "
            "학군 학교 배정 출퇴근 역세권 신축 구축 재건축 리모델링 분양 청약 정도 이랑 사이 중에 어느 쪽 좋을까요 "
            "좋은가요 괜찮을까요 있을까요 알려주세요 궁금합니다 생각 예산 대출 평수 평형".split())
+# 지역 이름이 단지 이름과 같은 경우가 있다('김포'·'경기'라는 단지) — 10-24 지식iN에서 지역 질문을 그 단지로 잡았다.
+STOP |= set("서울 부산 대구 인천 광주 대전 울산 세종 경기 강원 충북 충남 전북 전남 경북 경남 제주 수도권 지방 "
+            "김포 파주 운정 일산 고양 분당 판교 성남 용인 수원 광교 동탄 화성 평택 안양 평촌 의왕 군포 산본 과천 "
+            "하남 위례 광명 부천 시흥 안산 의정부 양주 남양주 구리 송도 청라 검단 원주 천안 청주 창원 포항 전주".split())
 
 
 def regions(text: str) -> tuple[str | None, str | None]:
@@ -64,7 +68,15 @@ def _gu_ok(item_gu: str, gu: str | None) -> bool:
     if not gu:
         return True
     a, b = _norm(item_gu), _norm(gu)
-    return bool(a) and (a == b or a.endswith(b) or b.endswith(a.split("시")[-1]))
+    if not a:
+        return False
+    if a == b:
+        return True
+    # '성남시분당구' ↔ '분당구'는 같게, '남양주시' ↔ '양주시'는 다르게 — 접미 앞이 '시'로 끝날 때만 같은 구(10-24 덕소→양주 오매칭)
+    if a.endswith(b) and a[: -len(b)].endswith("시"):
+        return True
+    tail = a.split("시")[-1]
+    return bool(tail) and b.endswith(tail) and b[: -len(tail)].endswith("시")
 
 
 def _dong_ok(item_dong: str, dong: str | None) -> bool:
@@ -81,7 +93,7 @@ def _core(name: str, region: set[str]) -> str:
     '목동진도2차' → '진도2', '목동우성2' → '우성2', '진도2' → '진도2'."""
     n = _norm(name)
     n = re.sub(r"(아파트|APT)$", "", n)
-    n = re.sub(r"(\d+)차$", r"\1", n)
+    n = re.sub(r"(\d+)(차|단지)$", r"\1", n)        # '덕소주공3단지' ↔ 리블 '덕소주공3' 
     for r in sorted(region, key=len, reverse=True):
         if r and n.startswith(r) and len(n) - len(r) >= 2:
             n = n[len(r):]
@@ -102,7 +114,7 @@ def _regions(*names: str | None) -> set[str]:
     return {r for r in out if len(r) >= 2}
 
 
-def complexes_from_entities(ent: dict, max_calls: int = 6) -> list[dict]:
+def complexes_from_entities(ent: dict, max_calls: int = 6, text: str = "") -> list[dict]:
     """Claude가 추출한 단지명·지역으로 찾는다. 결과의 구·동이 추출 지역과 다르면 버린다.
 
     ★오매칭 차단: '목동 진도2차'가 금천구 독산동 진도2차로 잡히던 것을 막는다(gu·dong 대조).
@@ -127,6 +139,19 @@ def complexes_from_entities(ent: dict, max_calls: int = 6) -> list[dict]:
         ex = lambda xs: [i for i in xs if _core(i["name"], base | _regions(i.get("dong"))) == core]
         # ★동 조건으로 0건이면 같은 구 안에서 다시 — '목동' 신시가지는 법정동 목동·신정동에 걸쳐 있다(목동우성2=신정동)
         exact = ex(in_dong) or (ex(in_gu) if gu else [])
+        region_ok = False
+        if not exact and text and len(core) >= 4:
+            # ★다른 도시 단지끼리 비교('김포 고촌센트럴자이 vs 의정부 고산수자인', 10-24 지식iN) — 추출 지역(김포)로는 못 찾는다.
+            #   전국에서 다시 찾되, 그 단지의 시·구 이름이 원글에 그대로 나올 때만 받는다. 이름은 핵심 이름이 앞부분과 같으면 같은 단지군으로 본다.
+            try:
+                wide = reevl.search(core, limit=20)
+            except Exception:
+                wide = []
+            calls += 1
+            fam = [i for i in wide if _core(i["name"], _regions(i.get("dong"))).startswith(core)
+                   and any(len(r) >= 2 and r in text for r in _regions(i.get("gu")) | {(i.get("gu") or "").split(" ")[0]})]
+            if len({i.get("gu") for i in fam}) == 1:
+                exact, region_ok = fam, True      # 시·구는 원글로 확인됨 — 같은 단지군 안에서는 세대수 큰 곳
         pick = exact
         if len(pick) > 1:
             # ★이름 앞에 붙은 동네('목동진도2차'의 '목동')를 단서로 좁힌다 — 동 이름이 같거나 단지명에 그 동네가 들어간 곳
@@ -136,7 +161,7 @@ def complexes_from_entities(ent: dict, max_calls: int = 6) -> list[dict]:
                 hint = [i for i in pick if (i.get("dong") or "").startswith(pre) or pre in i["name"]]
                 if hint:
                     pick = hint
-        if len(pick) > 1 and not (gu or dong):
+        if len(pick) > 1 and not (gu or dong or region_ok):
             continue
         if pick:
             best = max(pick, key=lambda i: i.get("hh") or 0)

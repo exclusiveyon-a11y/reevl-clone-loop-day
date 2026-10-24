@@ -43,6 +43,9 @@ def _bare(name: str) -> str:
     return name
 
 
+SCHOOL_CTX = re.compile(r"학군|학교|배정|통학|초등|중학|고등|학원가")
+
+
 def find(text: str) -> list[dict]:
     """글에 그대로 등장하는 허브만 고른다. 이름 유사도로 만들어 내지 않는다."""
     idx, hits = load(), []
@@ -50,7 +53,9 @@ def find(text: str) -> list[dict]:
     for kind in ("midschool", "school", "highschool", "univ", "builder"):
         for name in idx.get(kind, []):
             key = _bare(name)
-            if len(key) >= 3 and key in t:
+            # 학교 맥락 단어가 있고, 이름이 단어로 따로 나오거나 정식 이름(…고등학교)으로 나올 때만
+            if len(key) >= 3 and SCHOOL_CTX.search(text) and re.search(
+                    rf"(?<![가-힣]){re.escape(key)}(?:등학교|학교)?(?![가-힣])", text):
                 hits.append({"kind": kind, "name": name, "label": LABEL[kind], "path": f"/{kind}/{urllib.parse.quote(name)}"})
     stations = set(idx.get("station", []))
     for m in re.findall(r"([가-힣A-Za-z0-9]{2,10})역", text):
