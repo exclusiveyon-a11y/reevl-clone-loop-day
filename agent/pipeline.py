@@ -198,9 +198,9 @@ def run(queries: list[str], providers: list[str] | None = None, publish: bool = 
             _skip(base, "no_permission", "카페 등급 부족 — " + str(art.get("reason", ""))[:60], **ai_fields)
             summary["no_permission"] = summary.get("no_permission", 0) + 1
             continue
-        if channel == "naver_cafe" and "멤버" in str(art.get("reason", "")):
-            # 미가입 카페 — 읽기·댓글 모두 막힌다. 어느 카페에 가입하면 후보가 늘지 세기 위해 따로 센다.
-            _skip(base, "not_member", "미가입 카페(멤버 공개 글)", **ai_fields)
+        if channel == "naver_cafe" and ("멤버" in str(art.get("reason", "")) or (art.get("ok") and art.get("member") is False)):
+            # 미가입 카페 — 멤버 공개 글은 읽기부터, 전체 공개 글도 댓글은 막힌다. 어느 카페에 가입하면 후보가 늘지 세기 위해 따로 센다.
+            _skip(base, "not_member", "미가입 카페" + ("(멤버 공개 글)" if not art.get("ok") else "(전체 공개 글이지만 댓글은 가입 필요)"), **ai_fields)
             nm = summary.setdefault("not_member", {})
             nm[where] = nm.get(where, 0) + 1
             continue

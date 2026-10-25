@@ -1,7 +1,9 @@
 """원문 읽기 — 검수가 검색 요약(약 200자)이 아니라 글 전체·게시판·기존 댓글을 보고 판단하게 한다.
 
 - 네이버 카페: Aside(운영자 로그인 세션) 탭 하나에서 카페 글 API(apis.naver.com/cafe-web/cafe-articleapi/v2.1)를 차례로 읽는다.
-  게시판 이름·작성 시각·본문·댓글·댓글 쓰기 권한(authority.isWriteComment)이 한 번에 온다 → 미가입·등급 제한·삭제 글을 게시 전에 거른다.
+  게시판 이름·작성 시각·본문·댓글·댓글 쓰기 권한·가입 여부가 한 번에 온다 → 미가입·등급 제한·삭제 글을 게시 전에 거른다.
+  ★댓글 가능 = authority.isWriteComment **그리고** user.isCafeMember. 전체 공개 글은 미가입 계정에도 isWriteComment가 true로 와서
+  10-25 '니가 사는 그집' 글이 검수까지 통과했고, 게시 화면에는 댓글 칸 대신 '지금 가입하고 댓글에 참여해보세요'가 떴다.
   10-25 실측: 10-24에 댓글을 단 부동산스터디 글이 4003(삭제되었거나 존재하지 않는 게시글)로 나왔다 — 게시 뒤 생존 확인에도 쓴다.
 - 네이버 블로그: 공개 글이라 HTTP로 본문만 읽는다(댓글 칸은 게시 직전 dry-run이 확인).
 - 원문은 로컬 캐시(data/article_cache.json, 저장소 제외)에만 둔다. 작성자·댓글 닉네임은 담지 않는다.
@@ -90,11 +92,14 @@ try {
         const j = await r.json();
         if (!r.ok) { res.push({url, ok: false, status: r.status, code: j?.result?.errorCode || '', reason: (j?.result?.reason || '').slice(0, 80)}); }
         else {
-          const x = j.result || {}, a = x.article || {}, au = x.authority || {}, cm = x.comments || {};
+          const x = j.result || {}, a = x.article || {}, au = x.authority || {}, cm = x.comments || {}, us = x.user || {};
           res.push({url, ok: true, subject: a.subject || '', board: a.menu?.name || '', written: a.writeDate || 0,
                     comment_count: a.commentCount || 0, text: plain(a.contentHtml).slice(0, 3000),
                     comments: (cm.items || []).filter(c => !c.isDeleted).slice(0, 15).map(c => (c.content || '').replace(/\\s+/g, ' ').slice(0, 200)),
-                    can_comment: !!(au.isWriteComment && a.isWriteComment !== false), no_comment_why: cm.disableWriteReason || '',
+                    // ★authority.isWriteComment는 미가입 계정에도 true다 — 가입 여부(user.isCafeMember)를 같이 본다(10-25 '니가 사는 그집')
+                    member: us.isCafeMember === true,
+                    can_comment: !!(au.isWriteComment && a.isWriteComment !== false && us.isCafeMember === true),
+                    no_comment_why: cm.disableWriteReason || (us.isCafeMember === false ? '미가입' : ''),
                     blind: !!a.isBlind});
         }
       } catch (e) { res.push({url, ok: false, status: 0, reason: String(e).slice(0, 80)}); }
@@ -176,7 +181,7 @@ def read_many(items: list[tuple[str, str]]) -> dict[str, dict]:
     out, need_cafe = {}, []
     for ch, u in items:
         hit = cache.get(u)
-        if hit and now - hit.get("_t", 0) < TTL:
+        if hit and now - hit.get("_t", 0) < TTL and (ch != "naver_cafe" or "member" in hit or hit.get("deleted")):   # 가입 여부 없던 옛 캐시는 다시 읽는다
             out[u] = hit
         elif ch == "naver_cafe":
             need_cafe.append(u)
