@@ -270,12 +270,18 @@ EXTRACT_SYSTEM = """너는 한국 부동산 커뮤니티 글에서 조건을 뽑
 - complexes에는 동네 접두를 뗀 이름도 함께 넣는다(예: '목동진도2차' → '목동진도2차', '진도2차').
 - schools·stations: 학교명·역명(역 접미사 없이).
 - area: 평형·면적대 표현 그대로(예: '30평대', '84㎡'). budget: 예산 표현 그대로(예: '10억 이하').
-- purpose: 실거주·투자·기타 중 하나. concern: compare·price·school·jeonse·rebuild·commute·other 중 하나."""
+- purpose: 실거주·투자·기타 중 하나. concern: compare·price·school·jeonse·rebuild·commute·other 중 하나.
+- targets: 글쓴이가 고르거나 묻는 단지마다 하나씩(최대 3). 예시로 스친 단지·참고로 든 단지·구역 번호(한남5구역 등 아직 단지가 아닌 것)는 넣지 않는다.
+  name=글에 쓴 표기 그대로, aliases=정식명 추정·동네 뗀 이름·줄임말 풀이(최대 3), sido·gu·dong=그 단지의 지역.
+  단지마다 지역이 다르면 각각 채운다(예: '분당하이스트 vs 테헤란아이파크' → 성남시 분당구 / 강남구). 모르면 비운다."""
 
 EXTRACT_SCHEMA = {
     "type": "object",
     "properties": {
         "complexes": {"type": "array", "items": {"type": "string"}},
+        "targets": {"type": "array", "items": {"type": "object", "properties": {
+            "name": {"type": "string"}, "aliases": {"type": "array", "items": {"type": "string"}},
+            "sido": {"type": "string"}, "gu": {"type": "string"}, "dong": {"type": "string"}}, "required": ["name"]}},
         "sido": {"type": "string"}, "gu": {"type": "string"}, "dong": {"type": "string"},
         "schools": {"type": "array", "items": {"type": "string"}},
         "stations": {"type": "array", "items": {"type": "string"}},
@@ -292,6 +298,7 @@ def extract(post_title: str, post_text: str) -> tuple[dict, float]:
     out, usd = claude.call_tool(claude.SONNET, EXTRACT_SYSTEM, user, "extract", EXTRACT_SCHEMA,
                                 "글의 조건을 기록한다", max_tokens=3000)
     out["complexes"] = [c for c in (out.get("complexes") or []) if isinstance(c, str) and c.strip()][:5]
+    out["targets"] = [t for t in (out.get("targets") or []) if isinstance(t, dict) and (t.get("name") or "").strip()][:3]
     return out, usd
 
 

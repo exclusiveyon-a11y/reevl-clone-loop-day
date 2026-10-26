@@ -56,17 +56,28 @@ def _plain(path: str) -> str:
 
 
 def _pyeong(entities: dict | None, text: str) -> list[int]:
-    """글쓴이가 말한 평형대(20·30·40평대 …)를 나온 순서대로. 예: '진도2차 20평대 와 우성2차 40평대' → [20, 40]."""
-    for src in (text or "", str((entities or {}).get("area") or "")):   # 본문 우선, 없으면 Claude 추출값
+    """글쓴이가 말한 평형을 나온 순서대로. 평형대는 10의 배수, 정확한 평수는 음수로 표시한다.
+    예: '진도2차 20평대 와 우성2차 40평대' → [20, 40] · '수지삼성1차 (49평) vs 만현마을5단지 (37평)' → [-49, -37]
+    ★제목과 본문에 같은 평수가 되풀이되면(10-26 수지삼성1차) 단지 수와 어긋난다 — 제목 → 본문 → 추출값 순서로 처음 걸린 곳만 쓴다."""
+    title, _, body = (text or "").partition("\n")
+    for src in (title, body, str((entities or {}).get("area") or "")):
         got = [int(m) * 10 for m in re.findall(r"([1-9])0\s*평대", src)]
+        if got:
+            return got[:3]
+        got = [-int(m) for m in re.findall(r"(?<![\d.])([1-7]\d)\s*평(?!대)", src)]
         if got:
             return got[:3]
     return []
 
 
+def _plabel(py: int) -> str:
+    return f"{-py}평" if py < 0 else f"{py}평대"
+
+
 def _in_pyeong(ts: list[dict], py: int) -> list[dict]:
-    """N평대 → 전용면적 범위(대략 N×2.5 ~ (N+10)×2.6㎡)에서 가장 많이 거래된 면적의 거래들."""
-    lo, hi = py * 2.5, (py + 10) * 2.6
+    """N평대 → 전용면적 범위(대략 N×2.5 ~ (N+10)×2.6㎡), 정확한 N평(공급 평수) → 전용 N×2.3 ~ N×2.9㎡.
+    그 범위에서 가장 많이 거래된 면적의 거래들."""
+    lo, hi = (-py * 2.3, -py * 2.9) if py < 0 else (py * 2.5, (py + 10) * 2.6)
     cand = [t for t in ts if lo <= t["area_m2"] < hi]
     if not cand:
         return []
@@ -93,6 +104,11 @@ def build(text: str, channel: str = "copy", placement: str | None = None, qa: bo
         #   규칙 매칭이 '목동 진도2차'를 금천구 독산동 진도2차로 잡아 틀린 실거래를 쓴 적이 있다(2026-10-24).
         return {"ok": False, "why": "추출한 단지를 리블에서 확정하지 못함(동명 단지·표기 차이) — 틀린 단지를 쓰지 않으려 제외",
                 "complexes": [], "hubs": [], "fit": 0, "data": 0, "match_via": "entities_none"}
+    tg = (entities or {}).get("targets") or []
+    if cs and entities and entities.get("concern") == "compare" and len(tg) >= 2 and len(cs) < min(len(tg), 3):
+        # 셋을 묻는데 둘만 답하면 검수가 떨어뜨린다(10-25 '세 단지 중 두 곳만 답함') — 초안 전에 뺀다
+        return {"ok": False, "why": f"비교 대상 {len(tg)}곳 중 {len(cs)}곳만 확정", "complexes": cs, "hubs": [], "fit": 0, "data": 0,
+                "match_via": "entities_half"}
     if len(cs) == 1 and entities and entities.get("concern") == "compare":
         # 비교 질문에 한 단지만 답하면 반쪽 답이다(10-24 '부평현대2차 vs 부개주공3단지'에 현대2차만 답한 초안이 심사를 통과)
         return {"ok": False, "why": "비교 질문인데 두 단지를 모두 확정하지 못함", "complexes": cs, "hubs": [], "fit": 0, "data": 0,
@@ -125,7 +141,7 @@ def build(text: str, channel: str = "copy", placement: str | None = None, qa: bo
                     parts = []
                     break
                 last = max(pool, key=lambda t: t["date"])
-                parts.append(f"{c['name']} {py}평대 {eok(last['price'])}")
+                parts.append(f"{c['name']} {_plabel(py)} {eok(last['price'])}")
                 facts.append(_fact(c['name'], last, today))
             head = "말씀하신 평형 기준 최근 실거래는"
         if not parts:
@@ -154,7 +170,7 @@ def build(text: str, channel: str = "copy", placement: str | None = None, qa: bo
         c = cs[0]
         ts = reevl.trades(c["cid"])
         pool = _in_pyeong(ts, pyeong[0]) if pyeong else []
-        label = f"{pyeong[0]}평대" if pool else ""
+        label = _plabel(pyeong[0]) if pool else ""
         if not pool:
             got = _latest(c["cid"], today)
             if not got:
