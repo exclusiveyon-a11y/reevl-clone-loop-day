@@ -7,6 +7,7 @@
   price  가격형   — 글쓴이가 말한 평형 기준 최근 실거래로 답(비교 질문의 기본)
   link   링크형   — 단지가 하나라도 확정되면 그 단지 페이지, 리블이 가진 사실(세대수·연식·학군/역세권 점수·관리비·전세가율) 한두 개
   hub    허브형   — 단지가 없고 학교·역·지역을 말한 글이면 그 허브 페이지
+  explore 지역 조회형 — 글이 말한 시·구·동의 단지 목록에서 Claude가 질문에 맞는 단지(신축·구축 대비 등)를 고르고, 사실(리블 대표가·세대수·준공 후 연수)은 코드가 가져온다
   학군·통근·재건축·전세가 고민이면 링크형을 먼저, 아니면 가격형을 먼저 시도하고, 검수나 관문에서 떨어지면 다른 유형으로 한 번 더 시도한다.
 
 사용:  PYTHONPATH=. python -m agent.board --cafe jaegebal --cafe rainup --hours 72 --workers 6
@@ -147,11 +148,16 @@ def process(a: dict, art: dict) -> dict:
         ents, c = judge.extract(title, body); spent += c
         text = f"{title}\n{body}"
         post = {"board": art.get("board", ""), "title": title, "text": body, "written": art.get("written", "")}
-        routes = ["link", "price"] if ents.get("concern") in LINK_FIRST else ["price", "link"]
+        routes = ["link", "price", "explore"] if ents.get("concern") in LINK_FIRST else ["price", "link", "explore"]
         tried, last, pending = [], {}, None
         for kind in routes:
-            res = reply.build(text, "naver_cafe", f"naver_cafe-{a['slug']}-{a['id']}", False, entities=ents) if kind == "price" \
-                else reply.build_link(text, ents)
+            if kind == "price":
+                res = reply.build(text, "naver_cafe", f"naver_cafe-{a['slug']}-{a['id']}", False, entities=ents)
+            elif kind == "explore":
+                res = reply.build_explore(text, ents, post)
+                spent += res.get("spent", 0.0)
+            else:
+                res = reply.build_link(text, ents)
             if not res.get("ok"):
                 tried.append(f"{kind}: {res.get('why', '')[:50]}"); continue
             kind = res.get("kind", kind)

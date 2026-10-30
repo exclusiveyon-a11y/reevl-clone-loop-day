@@ -15,7 +15,7 @@ import re
 import urllib.parse
 from datetime import date
 
-from . import draft, hubs, intent, match, reevl, shortlink
+from . import draft, hubs, intent, judge, match, reevl, shortlink
 from .links import SITE, complex_path, compare_path, tracked
 
 DISCLOSE = os.environ.get("GTM_DISCLOSURE", "(제가 만든 서비스라 참고만 하세요)")
@@ -293,3 +293,37 @@ def build_link(text: str, entities: dict | None, channel: str = "naver_cafe", to
     return {"ok": True, "kind": "hub", "complexes": [], "hubs": [hub], "links": [link], "fit": 1, "data": 1, "match_via": "hub",
             "facts": [f"{hub['name']} {hub['label']} 주변 단지 목록 페이지(리블)"],
             "text": f"{hub['name']} 주변 단지 실거래를 한 페이지에 모아 볼 수 있어요.\n제가 운영하는 리블에 {hub['name']} 주변 단지 정리해 뒀어요 {link}"}
+
+
+def build_explore(text: str, entities: dict | None, post: dict, today: date | None = None) -> dict:
+    """지역 조회형 — 글이 말한 시·구·동의 단지 목록에서 질문에 맞는 단지를 Claude가 고르고(judge.pick),
+    사실(리블 대표가·대표 전용면적·세대수·준공 후 연수)은 코드가 데이터에서 직접 가져온다. 가격은 '리블 대표가'로 쓴다."""
+    ents = entities or {}
+    tg = [t for t in (ents.get("targets") or []) if isinstance(t, dict)]
+    sido = ents.get("sido") or next((t.get("sido") for t in tg if t.get("sido")), None)
+    gu = ents.get("gu") or next((t.get("gu") for t in tg if t.get("gu")), None)
+    dong = ents.get("dong") or next((t.get("dong") for t in tg if t.get("dong")), None)
+    if not (gu or dong):
+        return {"ok": False, "why": "지역(시·구·동)을 확정하지 못해 조회형을 쓸 수 없음", "complexes": [], "hubs": [], "fit": 0, "data": 0}
+    args = {"limit": 60, "sort": "hh", "fields": "cid,name,gu,dong,hh,age,price,area,ppm"}
+    if sido: args["sido"] = sido
+    if gu: args["gu"] = gu
+    if dong: args["dong"] = dong
+    try:
+        items = reevl.call("search_apartments", **args).get("items", [])
+    except Exception as e:
+        return {"ok": False, "why": f"지역 조회 실패: {str(e)[:60]}", "complexes": [], "hubs": [], "fit": 0, "data": 0}
+    items = [i for i in items if re.match(r"^\d{5}\|", i.get("cid", "")) and i.get("price")]
+    if len(items) < 2:
+        return {"ok": False, "why": "지역 조회 결과가 부족함", "complexes": [], "hubs": [], "fit": 0, "data": 0}
+    cids, usd = judge.pick(post, items)
+    by = {i["cid"]: i for i in items}
+    picked = [by[c] for c in cids if c in by]
+    if not picked:
+        return {"ok": False, "why": "질문에 맞는 단지를 고르지 못함", "complexes": [], "hubs": [], "fit": 0, "data": 0, "spent": usd}
+    facts = [f"{c['name']} 리블 대표가 {eok(c['price'])} 대표 전용 {c['area']}㎡ 기준 세대수 {c['hh']:,}세대 준공 후 {c['age']}년" for c in picked]
+    cs = [{"cid": c["cid"], "name": c["name"], "gu": c.get("gu"), "dong": c.get("dong"), "hh": c.get("hh")} for c in picked]
+    link = shortlink.compare([c["cid"] for c in picked]) if len(picked) >= 2 else _plain(complex_path(picked[0]["cid"]))
+    n = len(picked)
+    return {"ok": True, "kind": "explore", "complexes": cs, "hubs": [], "links": [link], "facts": facts, "fit": 2, "data": 2, "match_via": "explore", "spent": usd,
+            "text": f"{facts[0]}이에요.\n제가 운영하는 리블에 {'두' if n == 2 else '세' if n == 3 else ''} 단지 비교를 정리해 뒀어요 {link}".replace("  ", " ")}

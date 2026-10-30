@@ -204,6 +204,9 @@ complexes(답글이 다룬 단지의 리블 기준 이름·시군구·동·세�
 8 fits_board: 게시판이 질문·상담에 맞는가. 공지·광고·분양홍보·매물·후기·출석·가입인사 게시판이면 false. 게시판 이름이 비어 있으면 true.
 9 link_fit: link가 답글이 다룬 단지(들)의 페이지인가.
 
+★kind가 explore면 지역 조회형이다(2026-10-30): 글쓴이가 말한 지역의 단지 목록에서 질문에 맞는 단지를 골라 리블 대표가·연식·세대수로 답한다.
+  - right_target: 고른 단지가 글에서 말한 지역에 있으면 ok. answers_ask: 질문(신축·구축·가격 차이·규모)에 닿는 사실이 있으면 ok. 가격이 실거래가가 아니라 '리블 대표가'로 밝혀져 있어야 한다.
+  - no_advice는 엄격하다(원인 단정·추천·전망 금지).
 ★kind가 link 또는 hub면 링크형 답글이다(2026-10-30 운영자 확정): 가격을 비교하지 않고, 글이 말한 단지·학교·역·지역의 리블 페이지로 잇는다.
   - answers_ask: 글쓴이 질문과 관련된 사실을 하나 이상 주면 ok. 비교 질문에 일부 단지만 다뤄도 ok(다룬 단지가 맞는 단지이면). 질문과 무관한 사실만 있으면 false.
   - right_target: 링크 단지·허브가 글에 실제로 나온 대상이면 ok.
@@ -325,6 +328,8 @@ DRAFT_SYSTEM = """너는 한국 부동산 커뮤니티에 답글을 쓰는 리�
 - casual(디시·에펨·클리앙 등)은 음슴체: '…임.' / '내가 운영하는 리블에 <무엇> 정리해 둠 <link>'.
 - video(유튜브)는 한 줄, 링크 없이 끝에 '제가 운영하는 리블에서 같은 조건으로 비교해 볼 수 있어요.'
 - 숫자(금액·면적·평형)는 facts에 있는 표기 그대로만. 새 숫자·추정·평균 금지.
+- kind가 explore면(지역 조회형): facts의 단지만 쓰고, 글쓴이 질문(신축·구축·가격 차이·규모 등)에 닿는 대비(연식·세대수·대표가)를 한 문장으로 쓴다.
+  가격은 반드시 '리블 대표가'라고 쓴다(실거래가가 아니다). 비교하는 면적이 다르면 그 사실을 밝힌다. 원인을 단정하지 않는다(예: '연식과 세대수가 다르다'까지만).
 - kind가 link/hub면(링크형): 가격 비교로 답하지 않는다. facts 중 글쓴이 질문과 가장 관련 있는 사실 1~2개만 쓴다(학군이면 학군 점수, 통근이면 역세권 점수, 관리비면 월 관리비, 규모·연식이면 세대수·준공 후 연수).
   점수는 '리블 학군 점수 60점'처럼 리블 점수임을 밝히고, 단지 이름은 facts 표기 그대로. 질문과 직접 관련된 사실이 facts에 없으면 규모(세대수)와 연식만 쓴다. 링크는 받은 그대로.
 - 금지: 매수·매도 권유, 오른다·내린다 단정, 학교 배정 확정, 과장·비방."""
@@ -374,3 +379,21 @@ def relevance_gate(post: dict, comments: list[str], draft: str) -> tuple[bool, d
     """(통과 여부, 채점, 비용). 채점이 안 되면 통과시키지 않는다."""
     v, usd = grade(post, comments, draft)
     return bool(v) and v["relevance"] >= MIN_RELEVANCE, v, usd
+
+
+# ── 지역 조회형(explore) 단지 고르기(10-30) ───────────────────────────────
+PICK_SYSTEM = """너는 부동산 커뮤니티 글에 답할 때 '글쓴이가 실제로 궁금해하는 단지'를 후보 목록에서 고르는 도우미다.
+입력: post(제목·본문), candidates(그 지역 단지: name·세대수 hh·준공 후 연수 age·대표가 price(만원)·대표 전용면적 area).
+- 글이 단지를 직접 말했으면 그 단지를, 신축·구축·평형·가격차를 묻는 글이면 질문에 가장 잘 맞는 대비 쌍(예: 신축 1곳 + 구축 1곳)을 2~3개 고른다.
+- 글에 없는 조건을 만들지 않는다. 후보 목록에 없는 이름은 고르지 않는다. 고를 근거가 없으면 빈 배열을 돌려준다.
+- 반드시 candidates의 cid를 그대로 돌려준다."""
+PICK_SCHEMA = {"type": "object", "properties": {"cids": {"type": "array", "items": {"type": "string"}}, "reason": {"type": "string"}}, "required": ["cids", "reason"]}
+
+
+def pick(post: dict, candidates: list[dict]) -> tuple[list[str], float]:
+    payload = json.dumps({"post": {"title": (post.get("title") or "")[:200], "text": (post.get("text") or "")[:1200]},
+                          "candidates": [{k: c.get(k) for k in ("cid", "name", "hh", "age", "price", "area")} for c in candidates[:40]]}, ensure_ascii=False)
+    out, usd = claude.call_tool(claude.SONNET, PICK_SYSTEM, payload, "pick", PICK_SCHEMA, "고른 단지를 기록한다", max_tokens=3000)
+    valid = {c["cid"] for c in candidates}
+    cids = [c for c in (out.get("cids") or []) if c in valid]
+    return list(dict.fromkeys(cids))[:3], usd
