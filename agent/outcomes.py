@@ -86,12 +86,24 @@ def collect(rows: list[dict] | None = None, now: datetime | None = None) -> dict
         per.append({"candidate_id": r["candidate_id"], "posted_at": r["posted_at"], "age_h": None if age_h is None else round(age_h, 1),
                     "post_alive": bool(g.get("alive")), "our_comment_alive": bool(ours), "replies": len(reps),
                     "author_replies": sum(1 for x in reps if x["w"]), "comments_total": g.get("cc"), "err": g.get("err") or g.get("err2")})
+    # 발견 → 게시까지 걸린 시간(큐의 found_at·posted_at, 둘 다 시각이 있는 행만). 사람 승인 대기를 포함한 값이라 '사람이 쓴 시간'은 아니다.
+    lat = []
+    for r in rows:
+        if len(r["found_at"] or "") >= 16 and len(r["posted_at"] or "") >= 16:
+            try:
+                t0 = datetime.strptime(r["found_at"][:16], "%Y-%m-%d %H:%M")
+                t1 = datetime.strptime(r["posted_at"][:16], "%Y-%m-%d %H:%M")
+                lat.append((t1 - t0).total_seconds() / 3600)
+            except ValueError:
+                pass
+    lat.sort()
     n = len(per)
     live = [p for p in per if p["our_comment_alive"]]
     old = [p for p in live if (p["age_h"] or 0) >= 24]
     agg = {"posted": n, "kept": len(live), "with_reply": sum(1 for p in live if p["replies"]), "author_reacted": sum(1 for p in live if p["author_replies"]),
            "older24_live": len(old), "older24_author_reacted": sum(1 for p in old if p["author_replies"]),
-           "deleted_posts": sum(1 for p in per if not p["post_alive"])}
+           "deleted_posts": sum(1 for p in per if not p["post_alive"]),
+           "found_to_post_h_median": round(lat[len(lat) // 2], 1) if lat else None, "found_to_post_n": len(lat)}
     return {"aggregate": agg, "per_post": per}
 
 
@@ -102,7 +114,8 @@ def main() -> int:
     res = collect()
     g = res["aggregate"]
     print(f"게시 {g['posted']}건 · 유지 {g['kept']}/{g['posted']} · 삭제된 원글 {g['deleted_posts']} · 대화 반응 {g['with_reply']}/{g['kept']} · "
-          f"질문자 반응 {g['author_reacted']}/{g['kept']} · (24시간 이상 지난 글만: 질문자 반응 {g['older24_author_reacted']}/{g['older24_live']})")
+          f"질문자 반응 {g['author_reacted']}/{g['kept']} · (24시간 이상 지난 글만: 질문자 반응 {g['older24_author_reacted']}/{g['older24_live']}) · "
+          f"발견→게시 중앙값 {g['found_to_post_h_median']}시간(n={g['found_to_post_n']})")
     if a.json:
         json.dump(res, open(a.json, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     return 0
