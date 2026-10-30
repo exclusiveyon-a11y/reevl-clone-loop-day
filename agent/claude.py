@@ -107,7 +107,7 @@ def _post(body: dict) -> dict:
         "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
     for attempt in (1, 2):
         try:
-            return json.load(urllib.request.urlopen(req, timeout=40))
+            return json.load(urllib.request.urlopen(req, timeout=int(os.environ.get("GTM_CLAUDE_TIMEOUT", "40"))))
         except urllib.error.HTTPError as e:
             if attempt == 1 and (e.code == 429 or e.code >= 500):
                 time.sleep(2.0)
