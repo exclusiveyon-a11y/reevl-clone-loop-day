@@ -80,18 +80,22 @@ def cost(model: str, usage: dict) -> float:
             + u.get("cache_creation_input_tokens", 0) * p["cw"]) / 1_000_000
 
 
+_LOCK = __import__("threading").Lock()      # 동시에 여러 글을 처리해도 지출 기록이 서로 덮어쓰지 않게
+
+
 def _record(usd: float, model: str = "") -> None:
-    d = _load()
-    t = _today()
-    if model:
-        d["models"][model] = round(d["models"].get(model, 0.0) + usd, 8)
-    d["days"][t] = round(d["days"].get(t, 0.0) + usd, 8)
-    d["total"] = round(d["total"] + usd, 8)
-    try:
-        os.makedirs(os.path.dirname(SPEND) or ".", exist_ok=True)
-        json.dump(d, open(SPEND, "w", encoding="utf-8"))
-    except Exception:
-        pass
+    with _LOCK:
+        d = _load()
+        t = _today()
+        if model:
+            d["models"][model] = round(d["models"].get(model, 0.0) + usd, 8)
+        d["days"][t] = round(d["days"].get(t, 0.0) + usd, 8)
+        d["total"] = round(d["total"] + usd, 8)
+        try:
+            os.makedirs(os.path.dirname(SPEND) or ".", exist_ok=True)
+            json.dump(d, open(SPEND, "w", encoding="utf-8"))
+        except Exception:
+            pass
 
 
 def _post(body: dict) -> dict:

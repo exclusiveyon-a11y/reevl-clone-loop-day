@@ -159,6 +159,11 @@ def post(channel: str, url: str, text: str, dry: bool = True, timeout: int = 180
         return {"ok": False, "why": "자동 게시 중지됨(GTM_AUTOPUBLISH≠1) — 사람 게시", "human": True}
     if channel not in SCRIPTS:
         return {"ok": False, "why": f"{channel} 자동 게시 미지원 — 사람 게시", "human": True}
+    if not dry:
+        from . import guard
+        blocked = guard.enforce(url, text)          # 카페별 하루 상한·간격·링크 중복·관계 공개(10-30)
+        if blocked:
+            return blocked
     try:
         r = subprocess.run([EXE, "repl", SCRIPTS[channel](url, text, dry)], capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError:

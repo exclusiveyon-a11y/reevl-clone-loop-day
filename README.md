@@ -173,6 +173,11 @@ https://reevl.co.kr/c/ZaFYk94S (제가 만든 서비스라 참고만 하세요)
 | `python -m agent run` | 찾기 → 매칭 → 초안 → 점수 → 대기열 (게시 안 함) | 검색 키 |
 | `GTM_AUTOPUBLISH=1 python -m agent run --publish` | 위 과정 + 허용 채널에 Aside로 게시, 실패는 사람에게 (**기본 꺼짐**) | 검색 키, Aside 앱 로그인, `data/rules.json` |
 | `python -m agent queue list` | 후보·상태·점수 보기 | 없음 |
+| `python -m agent.board --cafe <주소> --hours 72` | 가입한 카페 게시판의 최신·인기 글을 동시 처리로 읽고 가격형·링크형·허브형 답변 후보 만들기 (게시 안 함, `--retry`로 탈락 글 재검토) | Aside 로그인, Claude 키 |
+| `python -m agent.outcomes` | 올린 댓글의 유지·답글·원글 작성자 반응(분자/분모) | Aside 로그인 |
+| `python analysis/quality_eval.py` | 올린 댓글을 6항목으로 사후 채점 | Claude 키 |
+| `python analysis/ga_persistence.py` | 댓글별 D0~D5 유입 | GA4 읽기 자격 |
+| `python -m unittest discover -s tests` | 매칭 키·수치 검사·평수 인식·보호 장치 단위 테스트 | 없음 |
 | `python -m agent human` | 사람이 게시할 대기열과 초안 보기 | 없음 |
 | `python -m agent.admin` | **관리자 화면**(http://127.0.0.1:8799): 단계별 건수, 후보 카드, 초안 복사, 게시 완료·제외 표시 | 없음 (`--demo`는 예시 데이터) |
 
@@ -196,6 +201,8 @@ https://reevl.co.kr/c/ZaFYk94S (제가 만든 서비스라 참고만 하세요)
 - 네이버 검색 유입은 이미 혼자 크고 있으므로 성과로 세지 않고 추이만 본다. 성과는 캠페인 세션과 네이버 밖 외부 유입의 증가분이다. 자세한 정의는 [docs/04-measurement.md](docs/04-measurement.md).
 
 ## 결과
+
+**중간 결과 (10/24~10/30, 게시 11건, GA4 사람 필터)** — 댓글 링크로 들어온 방문 53세션(52명 신규), 참여율 85%(사이트 68%), 세션당 PV 7.9(2.34), 단지 상세 40회. 게시물 유지 10/11, 우리 댓글에 답글 3/10(모두 원글 작성자, 감사·긍정), 지속 유입(D2 이후) 10/53. 사이트 전체 세션 성장(+37%)의 대부분은 네이버 검색이고 댓글 몫은 전체의 약 1.4%다. 사후 채점에서 질문 적합성이 평균 2.0/5로 낮게 나와 게시 전 관문을 추가했다. 자세한 정의·한계: [품질·신뢰 지표](docs/09-quality-trust-metrics.md) · [정책 체크리스트](docs/10-policy-checklist.md).
 
 7일 측정 진행 중(2026-10-24 18:00 시작). 목표는 맨 위 **7-Day Goals** 표 하나를 기준으로 한다. 기준값의 출처·정의는 [docs/01-baseline.md](docs/01-baseline.md), 일별 숫자는 [results/daily-log.md](results/daily-log.md), 매일의 개선은 [docs/07-loop-log.md](docs/07-loop-log.md)에 적는다. 성과가 나오기 전에는 성과를 주장하지 않는다.
 

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.error
 import urllib.parse
@@ -73,6 +74,7 @@ REVIEW_SCHEMA = {
 _URL = re.compile(r"https?://\S+")
 _AMOUNT = re.compile(r"\d+(?:\.\d+)?억|\d{1,3}(?:,\d{3})+만|\d+만")
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}|(?<![\d.])\d{1,2}/\d{1,2}(?![\d/])|(?<![\d.])\d{2}\.\d{1,2}(?![\d.억만])")
+_UNITNUM = re.compile(r"[+-]?\d[\d,]*(?:\.\d+)?\s?(?:세대|년|점|%)")
 _DISCLOSE = re.compile(r"제가 (만든|운영하는)|내가 (만든|운영하는)")
 
 
@@ -87,6 +89,11 @@ def code_check(draft: str, facts: list[str]) -> list[str]:
     for d in _DATE.findall(body):
         if d not in blob:
             issues.append(f"facts에 없는 날짜: {d}")
+    blob_n = re.sub(r"\s+", "", blob)
+    for m in _UNITNUM.finditer(body):
+        tok = re.sub(r"\s+", "", m.group(0))
+        if tok not in blob_n and not any(tok.lstrip("+-") == t.lstrip("+-") for t in re.findall(r"[+-]?\d[\d,]*(?:\.\d+)?(?:세대|년|점|%)", blob_n)):
+            issues.append(f"facts에 없는 수치: {m.group(0)}")
     if len(_URL.findall(draft)) > 1:
         issues.append("링크가 2개 이상")
     if not _DISCLOSE.search(draft):
@@ -197,6 +204,12 @@ complexes(답글이 다룬 단지의 리블 기준 이름·시군구·동·세�
 8 fits_board: 게시판이 질문·상담에 맞는가. 공지·광고·분양홍보·매물·후기·출석·가입인사 게시판이면 false. 게시판 이름이 비어 있으면 true.
 9 link_fit: link가 답글이 다룬 단지(들)의 페이지인가.
 
+★kind가 link 또는 hub면 링크형 답글이다(2026-10-30 운영자 확정): 가격을 비교하지 않고, 글이 말한 단지·학교·역·지역의 리블 페이지로 잇는다.
+  - answers_ask: 글쓴이 질문과 관련된 사실을 하나 이상 주면 ok. 비교 질문에 일부 단지만 다뤄도 ok(다룬 단지가 맞는 단지이면). 질문과 무관한 사실만 있으면 false.
+  - right_target: 링크 단지·허브가 글에 실제로 나온 대상이면 ok.
+  - link_fit: 링크가 단지 페이지·허브 페이지이고 답글이 말한 대상이면 ok.
+  - no_advice는 그대로 엄격하다(전망·추천·단정 금지). 리블 점수는 리블이 계산한 값으로 밝혀야 한다.
+
 pass는 아홉 항목이 모두 ok일 때만 true. 근거는 한국어로 짧게. confidence는 전체 판정 확신(0~1)."""
 
 AUDIT_SCHEMA = {
@@ -231,7 +244,7 @@ def _audit_one(model: str, payload: str) -> tuple[dict, float]:
 
 
 def audit(post: dict, comments: list[str], draft: str, facts: list[str], complexes: list[dict], link: str,
-          channel: str, style: str = "polite") -> tuple[dict, float]:
+          channel: str, style: str = "polite", kind: str = "price") -> tuple[dict, float]:
     """코드 검사(수치·날짜·공개·형식·링크 대상) → Opus·Sonnet 독립 판정. 둘 다 통과해야 pass.
     post = {board, title, text, written}. 원문은 3,000자, 댓글은 15개까지. 닉네임은 넣지 않는다."""
     cids = [c.get("cid", "") for c in complexes if c.get("cid")]
@@ -243,7 +256,7 @@ def audit(post: dict, comments: list[str], draft: str, facts: list[str], complex
         "post": {"board": post.get("board", ""), "title": (post.get("title") or "")[:200],
                  "text": (post.get("text") or "")[:3000], "written": post.get("written", "")},
         "comments": [c[:200] for c in (comments or [])[:15]],
-        "draft": draft, "facts": facts,
+        "draft": draft, "facts": facts, "kind": kind,
         "complexes": [{"name": c.get("name"), "sigungu": c.get("gu"), "dong": c.get("dong"), "households": c.get("hh")}
                       for c in complexes],
         "link": ("리블 비교 페이지: " if "/c/" in link else "리블 단지 페이지: ") + ", ".join(c.get("name", "") for c in complexes),
@@ -312,16 +325,52 @@ DRAFT_SYSTEM = """너는 한국 부동산 커뮤니티에 답글을 쓰는 리�
 - casual(디시·에펨·클리앙 등)은 음슴체: '…임.' / '내가 운영하는 리블에 <무엇> 정리해 둠 <link>'.
 - video(유튜브)는 한 줄, 링크 없이 끝에 '제가 운영하는 리블에서 같은 조건으로 비교해 볼 수 있어요.'
 - 숫자(금액·면적·평형)는 facts에 있는 표기 그대로만. 새 숫자·추정·평균 금지.
+- kind가 link/hub면(링크형): 가격 비교로 답하지 않는다. facts 중 글쓴이 질문과 가장 관련 있는 사실 1~2개만 쓴다(학군이면 학군 점수, 통근이면 역세권 점수, 관리비면 월 관리비, 규모·연식이면 세대수·준공 후 연수).
+  점수는 '리블 학군 점수 60점'처럼 리블 점수임을 밝히고, 단지 이름은 facts 표기 그대로. 질문과 직접 관련된 사실이 facts에 없으면 규모(세대수)와 연식만 쓴다. 링크는 받은 그대로.
 - 금지: 매수·매도 권유, 오른다·내린다 단정, 학교 배정 확정, 과장·비방."""
 
 DRAFT_SCHEMA = {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}
 
 
-def draft(post: dict, entities: dict, facts: list[str], channel: str, link: str, style: str) -> tuple[dict, float]:
+def draft(post: dict, entities: dict, facts: list[str], channel: str, link: str, style: str, kind: str = "price") -> tuple[dict, float]:
     user = json.dumps({"post": {"title": (post.get("title") or "")[:200], "text": (post.get("text") or "")[:1500]},
-                       "entities": entities or {}, "facts": facts, "link": link, "style": style, "channel": channel},
+                       "entities": entities or {}, "facts": facts, "link": link, "style": style, "channel": channel, "kind": kind},
                       ensure_ascii=False)
     out, usd = claude.call_tool(claude.SONNET, DRAFT_SYSTEM, user, "answer", DRAFT_SCHEMA,
                                 "답글 전문을 기록한다", max_tokens=3000)
     out["text"] = (out.get("text") or "").strip()
     return out, usd
+
+
+# ── 질문 적합성 관문(10-30) ─────────────────────────────────────────────
+# 게시한 10건을 Opus로 사후 채점했더니 '질문 적합성'이 평균 2.0/5였다 — 검수(audit)는 통과했지만 '어디가 나은지'에는 닿지 못하고
+# 실거래 두 줄만 적은 답이 대부분이었다. 그래서 같은 채점표를 게시 전 관문으로 쓴다: 질문 적합성 3 미만이면 게시 후보에서 뺀다.
+GRADE_ITEMS = ["relevance", "evidence", "accuracy", "non_promo", "natural", "followup"]
+GRADE_SYSTEM = """너는 부동산 커뮤니티 답글의 평가자다. 운영자가 올릴 답글(draft)을 원글(post)과 기존 댓글(others)에 비추어 1~5점으로 채점한다(5가 좋음).
+항목: relevance(질문 적합성: 글쓴이가 실제로 물은 것에 닿았는가 — 고민이 '어디가 나은지·왜 비싼지·학군이 어떤지'인데 가격만 나열했다면 2점 이하) ·
+evidence(실거래 근거: 수치가 출처 있는 사실로 제시됐는가) · accuracy(정확성: 단지·평형·수치가 글과 맞는가, 과장·단정이 없는가) ·
+non_promo(비광고성: 정보가 먼저이고 링크가 부가적이며 관계 공개가 있는가) · natural(자연스러움) · followup(후속 대응 가능성).
+엄격하게 채점한다. 각 점수 옆 *_why에 한 줄 근거, weakness에 가장 큰 약점 한 문장. 입력에 없는 사실을 지어내지 않는다."""
+GRADE_SCHEMA = {"type": "object",
+                "properties": {**{k: {"type": "integer", "minimum": 1, "maximum": 5} for k in GRADE_ITEMS},
+                               **{k + "_why": {"type": "string"} for k in GRADE_ITEMS}, "weakness": {"type": "string"}},
+                "required": GRADE_ITEMS + [k + "_why" for k in GRADE_ITEMS] + ["weakness"]}
+MIN_RELEVANCE = int(os.environ.get("GTM_MIN_RELEVANCE", "3"))
+
+
+def grade(post: dict, comments: list[str], draft: str, model: str = claude.OPUS) -> tuple[dict, float]:
+    payload = json.dumps({"post": {"title": (post.get("title") or "")[:200], "text": (post.get("text") or "")[:1800], "board": post.get("board", "")},
+                          "others": [c[:160] for c in (comments or []) if "reevl" not in c][:12], "draft": draft}, ensure_ascii=False)
+    total = 0.0
+    for _ in range(3):
+        v, usd = claude.call_tool(model, GRADE_SYSTEM, payload, "grade", GRADE_SCHEMA, "채점 결과를 기록한다", max_tokens=4000)
+        total += usd
+        if all(isinstance(v.get(k), int) and 1 <= v[k] <= 5 for k in GRADE_ITEMS):
+            return v, total
+    return {}, total
+
+
+def relevance_gate(post: dict, comments: list[str], draft: str) -> tuple[bool, dict, float]:
+    """(통과 여부, 채점, 비용). 채점이 안 되면 통과시키지 않는다."""
+    v, usd = grade(post, comments, draft)
+    return bool(v) and v["relevance"] >= MIN_RELEVANCE, v, usd

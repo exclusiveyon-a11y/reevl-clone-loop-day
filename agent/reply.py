@@ -222,3 +222,74 @@ def build(text: str, channel: str = "copy", placement: str | None = None, qa: bo
     return {"ok": True, "text": out, "links": [link], "complexes": cs, "hubs": hs, "fit": fit, "data": data,
             "facts": facts, "match_via": via,
             "intents": intents, "kind": kind, "as_of": today.isoformat()}
+
+
+def _axis_facts(c: dict) -> list[str]:
+    """단지 하나의 사실 — 세대수·연식·전세가율·1년 등락·학군/역세권 점수·월 관리비. 값이 없는 축은 뺀다(AI 예측·고점 대비는 쓰지 않는다)."""
+    a = reevl.apartment(c["cid"])
+    b, g, j, r, loc, bld = (a.get(k) or {} for k in ("기본", "가격", "전세월세", "등락", "입지", "건물"))
+    n, out = c["name"], []
+    if b.get("hh"):
+        out.append(f"{n} 세대수 {b['hh']:,}세대")
+    if b.get("age") is not None:
+        out.append(f"{n} 준공 후 {b['age']}년")
+    if j.get("jr"):
+        out.append(f"{n} 전세가율 {j['jr']}%")
+    if r.get("r12") is not None:
+        out.append(f"{n} 최근 1년 매매가 등락 {r['r12']:+d}%")
+    if loc.get("hakgun") is not None:
+        out.append(f"{n} 리블 학군 점수 {loc['hakgun']}점(0~100)")
+    if loc.get("elem") is not None or (a.get("주변") or {}).get("elem") is not None:
+        out.append(f"{n} 리블 기준 초등학교까지 거리 {(a.get('주변') or {}).get('elem')}m")
+    if loc.get("subway") is not None:
+        out.append(f"{n} 리블 역세권 점수 {loc['subway']}점(0~100)")
+    if bld.get("mgmt"):
+        out.append(f"{n} 월 관리비 단지 평균 {round(bld['mgmt'] / 10000)}만원")
+    return out
+
+
+REGION_RE = re.compile(r"[가-힣]+(?:시|군|구)")
+
+
+def build_link(text: str, entities: dict | None, channel: str = "naver_cafe", today: date | None = None) -> dict:
+    """링크형 답변(10-30 사용자 제안) — 글이 말한 단지가 있으면 그 단지 페이지, 없으면 학교·역·지역 허브로 잇는다.
+    비교를 묻더라도 단지가 하나만 확정되면 그 단지 페이지로 간다. 가격으로 답하지 못하는 질문(학군·세대수·연식·관리비 등)에는
+    리블이 가진 사실(_axis_facts)을 한두 개 붙인다. 전망·추천·단정은 쓰지 않는다."""
+    today = today or date.today()
+    cs = []
+    if entities and (entities.get("targets") or entities.get("complexes")):
+        try:
+            cs = match.complexes_from_entities(entities, text=text)
+        except Exception:
+            cs = []
+    try:
+        hs = hubs.find(text)
+    except Exception:
+        hs = []
+    st = intent.style(channel)
+    if cs:
+        c = cs[0]
+        facts = _axis_facts(c)
+        ts = reevl.trades(c["cid"])
+        if ts:
+            last = max(ts, key=lambda t: t["date"])
+            facts.append(_fact(c["name"], last, today))
+        link = shortlink.compare([x["cid"] for x in cs[:3]]) if len(cs) >= 2 else _plain(complex_path(c["cid"]))
+        return {"ok": True, "kind": "link", "complexes": cs[:3] if len(cs) >= 2 else [c], "hubs": hs, "links": [link],
+                "facts": facts, "fit": 2, "data": 2, "match_via": "link",
+                "text": f"{facts[0] if facts else c['name']}이에요.\n제가 운영하는 리블에 {c['name']} 실거래와 입지 정리해 뒀어요 {link}"}
+    hub = next((h for h in hs if h["kind"] in ("midschool", "school", "highschool", "station", "region", "univ")), None)
+    if not hub and entities and entities.get("sido") and entities.get("gu"):
+        # 지역 허브 이름은 '서울 구로구' 형식이다. 추출한 시도·구가 허브 목록에 정확히 있을 때만 쓴다.
+        want = f"{entities['sido'][:2]} {entities['gu']}"
+        alias = {"서울": "서울", "경기": "경기", "인천": "인천", "부산": "부산"}
+        for name in hubs.load().get("region", []):
+            if name == want or (name.split(" ")[-1] == entities["gu"] and name.split(" ")[0] == alias.get(entities["sido"][:2], entities["sido"][:2])):
+                hub = {"kind": "region", "name": name, "label": "지역", "path": "/region/" + urllib.parse.quote(name)}
+                break
+    if not hub:
+        return {"ok": False, "why": "링크로 이을 단지·학교·역·지역을 찾지 못함", "complexes": [], "hubs": hs, "fit": 0, "data": 0}
+    link = _plain(hub["path"])
+    return {"ok": True, "kind": "hub", "complexes": [], "hubs": [hub], "links": [link], "fit": 1, "data": 1, "match_via": "hub",
+            "facts": [f"{hub['name']} {hub['label']} 주변 단지 목록 페이지(리블)"],
+            "text": f"{hub['name']} 주변 단지 실거래를 한 페이지에 모아 볼 수 있어요.\n제가 운영하는 리블에 {hub['name']} 주변 단지 정리해 뒀어요 {link}"}
