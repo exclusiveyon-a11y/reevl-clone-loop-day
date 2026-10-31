@@ -241,6 +241,8 @@ def _axis_facts(c: dict) -> list[str]:
         out.append(f"{n} 리블 학군 점수 {loc['hakgun']}점(0~100)")
     if loc.get("elem") is not None or (a.get("주변") or {}).get("elem") is not None:
         out.append(f"{n} 리블 기준 초등학교까지 거리 {(a.get('주변') or {}).get('elem')}m")
+    if loc.get("transit") is not None:
+        out.append(f"{n} 리블 교통 점수 {loc['transit']}점(0~100)")
     if loc.get("subway") is not None:
         out.append(f"{n} 리블 역세권 점수 {loc['subway']}점(0~100)")
     if bld.get("mgmt"):
@@ -269,8 +271,11 @@ def build_link(text: str, entities: dict | None, channel: str = "naver_cafe", to
     st = intent.style(channel)
     if cs:
         c = cs[0]
-        facts = _axis_facts(c)
-        ts = reevl.trades(c["cid"])
+        # ★비교 질문(단지 둘 이상 확정)이면 단지마다 사실을 모은다 — 첫 단지 것만 쓰면 '입지 vs 신축' 같은 대비 질문에 닿지 못한다(10-31)
+        facts = []
+        for x in cs[:3]:
+            facts += _axis_facts(x)
+        ts = reevl.trades(c["cid"]) if len(cs) == 1 else []
         if ts:
             last = max(ts, key=lambda t: t["date"])
             facts.append(_fact(c["name"], last, today))
